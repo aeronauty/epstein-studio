@@ -5,4 +5,6 @@ urlpatterns = [
     path("", views.index, name="index"),
     path("random-pdf/", views.random_pdf, name="random_pdf"),
     path("search-pdf/", views.search_pdf, name="search_pdf"),
+    path("register/", views.register, name="register"),
+    path("logout/", views.logout_view, name="logout"),
 ]

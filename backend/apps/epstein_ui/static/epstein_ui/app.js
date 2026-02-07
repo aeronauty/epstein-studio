@@ -18,7 +18,6 @@ const sizeInput = document.getElementById("sizeInput");
 const kerningToggle = document.getElementById("kerningToggle");
 const colorPicker = document.getElementById("colorPicker");
 const opacityRange = document.getElementById("opacityRange");
-const resetBtn = document.getElementById("resetBtn");
 const randomBtn = document.getElementById("randomBtn");
 const searchInput = document.getElementById("searchInput");
 const searchBtn = document.getElementById("searchBtn");
@@ -37,6 +36,7 @@ let view = { x: 0, y: 0, scale: 1 };
 let isResizing = false;
 let canvasSize = { width: 900, height: 520 };
 let firstPageWidth = 900;
+const DEFAULT_TEXT_SIZE = 24;
 const VIEW_W = 900;
 const VIEW_H = 520;
 const PAGE_GAP = 24;
@@ -56,6 +56,9 @@ const pdfState = new Map();
 let pagesMeta = [];
 let autoPanActive = false;
 let contextTarget = null;
+
+sizeRange.value = DEFAULT_TEXT_SIZE;
+sizeInput.value = DEFAULT_TEXT_SIZE;
 
 function setActiveTab(tabId) {
   activeTab = tabId;
@@ -402,8 +405,8 @@ function createTextBox(x, y) {
   group.appendChild(handle);
   textLayer.appendChild(group);
 
-  setActiveGroup(group);
   applyStylesToGroup(group);
+  setActiveGroup(group);
   selectAllText(editor);
   editor.focus();
   return group;
@@ -1026,11 +1029,6 @@ italicToggle.addEventListener("click", () => {
   italicToggle.classList.toggle("active");
   if (activeGroup) {
     applyStylesToGroup(activeGroup);
-  }
-});
-resetBtn.addEventListener("click", () => {
-  if (activeGroup) {
-    setTranslate(activeGroup, 180, 250);
   }
 });
 randomBtn.addEventListener("click", fetchRandomPdf);

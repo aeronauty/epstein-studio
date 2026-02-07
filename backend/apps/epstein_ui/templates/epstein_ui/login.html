@@ -1,0 +1,41 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Epstein Studio Login</title>
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="topbar">
+        <div class="brand">Epstein Studio</div>
+      </header>
+      <main class="layout" style="grid-template-columns: 1fr;">
+        <section class="panel" style="max-width: 420px; margin: 8vh auto 0;">
+          <div class="tab-panel active" style="display: flex;">
+            <div class="hint">Sign in with your username and password.</div>
+            {% if form.errors %}
+              <div class="hint" style="color: #ff6b6b;">Invalid username or password.</div>
+            {% endif %}
+            <form method="post" style="display: flex; flex-direction: column; gap: 16px;">
+              {% csrf_token %}
+              {% if next %}<input type="hidden" name="next" value="{{ next }}" />{% endif %}
+              <label class="field">
+                <span>Username</span>
+                <input type="text" name="username" autocomplete="username" required autofocus />
+              </label>
+              <label class="field">
+                <span>Password</span>
+                <input type="password" name="password" autocomplete="current-password" required />
+              </label>
+              <button type="submit" class="btn">Log In</button>
+            </form>
+            <div class="hint">Need an account? <a href="/register/">Create one</a></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
