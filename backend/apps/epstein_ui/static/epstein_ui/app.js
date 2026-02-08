@@ -155,6 +155,11 @@ if (!isAuthenticated) {
 }
 updateCreateAnnotationButton();
 
+function setFileTitleLoading(isLoading) {
+  if (!fileTitle) return;
+  fileTitle.textContent = isLoading ? "Loading..." : "No file loaded";
+}
+
 function showAnnotationControls() {
   annotationControls.classList.remove("hidden");
   createAnnotationBtn.classList.add("hidden");
@@ -2332,6 +2337,7 @@ function syncPages(pages, pdfName) {
 async function fetchRandomPdf() {
   randomBtn.disabled = true;
   randomBtn.textContent = "Loading...";
+  setFileTitleLoading(true);
   try {
     const response = await fetch("/random-pdf/");
     if (!response.ok) {
@@ -2347,6 +2353,9 @@ async function fetchRandomPdf() {
   } finally {
     randomBtn.disabled = false;
     randomBtn.textContent = "Random PDF";
+    if (!currentPdfKey) {
+      setFileTitleLoading(false);
+    }
   }
 }
 
@@ -2355,6 +2364,7 @@ async function searchPdf() {
   if (!query) return;
   searchBtn.disabled = true;
   searchBtn.textContent = "Loading...";
+  setFileTitleLoading(true);
   try {
     const response = await fetch(`/search-pdf/?q=${encodeURIComponent(query)}`);
     if (!response.ok) {
@@ -2370,6 +2380,9 @@ async function searchPdf() {
   } finally {
     searchBtn.disabled = false;
     searchBtn.textContent = "Open";
+    if (!currentPdfKey) {
+      setFileTitleLoading(false);
+    }
   }
 }
 

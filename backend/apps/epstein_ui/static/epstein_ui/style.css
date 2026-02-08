@@ -1091,6 +1091,24 @@ image {
   width: 100%;
 }
 
+.coffee-link {
+  position: fixed;
+  right: clamp(20px, 4vw, 52px);
+  bottom: 10px;
+  font-size: 12px;
+  color: #9aa3a8;
+  text-decoration: none;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  transition: color 0.15s ease;
+  z-index: 5;
+}
+
+.coffee-link:hover {
+  color: var(--text);
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
