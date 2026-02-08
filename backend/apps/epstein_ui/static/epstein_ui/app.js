@@ -105,6 +105,8 @@ let pendingConfirm = null;
 let hoverCircle = null;
 let lastHoverPoint = null;
 let hoveredAnchorId = null;
+let hoverPreviewState = null;
+let hoverPreviewId = null;
 
 function formatTimestamp(value, { dateOnly = false } = {}) {
   if (!value) return "";
@@ -698,6 +700,9 @@ function renderNotesList() {
         updateAnchorSize(anchor);
       }
       if (!activeAnnotationId && !activeAnnotationViewOnly) {
+        previewAnnotationInView(ann);
+      }
+      if (!activeAnnotationId && !activeAnnotationViewOnly) {
         setAnnotationElementsVisible(ann.id, true);
       }
     });
@@ -713,8 +718,13 @@ function renderNotesList() {
       if (!activeAnnotationId && !activeAnnotationViewOnly) {
         setAnnotationElementsVisible(ann.id, false);
       }
+      restoreHoverPreview(ann.id);
     });
     wrapper.addEventListener("click", () => {
+      if (hoverPreviewId === ann.id) {
+        hoverPreviewState = null;
+        hoverPreviewId = null;
+      }
       if (ann.isOwner) {
         if (activeAnnotationId === ann.id && activeAnnotationViewOnly) {
           clearActiveAnnotation();
@@ -1424,6 +1434,50 @@ function updateMinimapViewport() {
   minimapViewport.setAttribute("height", height);
 }
 
+function getDefaultViewScale() {
+  return (VIEW_W * 0.8) / Math.max(1, firstPageWidth);
+}
+
+function getViewBounds() {
+  const left = -view.x / view.scale;
+  const top = -view.y / view.scale;
+  const right = left + VIEW_W / view.scale;
+  const bottom = top + VIEW_H / view.scale;
+  return { left, top, right, bottom };
+}
+
+function isPointInView(x, y, padding = 0) {
+  const bounds = getViewBounds();
+  return (
+    x >= bounds.left + padding &&
+    x <= bounds.right - padding &&
+    y >= bounds.top + padding &&
+    y <= bounds.bottom - padding
+  );
+}
+
+function previewAnnotationInView(ann) {
+  if (!ann) return;
+  if (isPointInView(ann.x, ann.y, 8)) return;
+  if (!hoverPreviewState) {
+    hoverPreviewState = { x: view.x, y: view.y, scale: view.scale };
+  }
+  hoverPreviewId = ann.id;
+  view.scale = getDefaultViewScale();
+  centerOn(ann.x, ann.y);
+}
+
+function restoreHoverPreview(id) {
+  if (!hoverPreviewState) return;
+  if (id && hoverPreviewId && id !== hoverPreviewId) return;
+  view.x = hoverPreviewState.x;
+  view.y = hoverPreviewState.y;
+  view.scale = hoverPreviewState.scale;
+  hoverPreviewState = null;
+  hoverPreviewId = null;
+  setViewportTransform();
+}
+
 function scrollMinimapToView() {
   if (!minimapScroll) return;
   const y = parseFloat(minimapViewport.getAttribute("y") || "0");
@@ -1453,7 +1507,7 @@ function centerOn(x, y) {
 
 function fitToView(force = false) {
   if (hasUserZoomed && !force) return;
-  view.scale = (VIEW_W * 0.8) / Math.max(1, firstPageWidth);
+  view.scale = getDefaultViewScale();
   view.x = (VIEW_W - firstPageWidth * view.scale) / 2;
   view.y = 24;
   setViewportTransform();
