@@ -254,12 +254,17 @@ function ensureHeatmapCanvas() {
   const parentRect = heatmapCanvas.parentElement?.getBoundingClientRect();
   if (!parentRect) return;
   const dpr = window.devicePixelRatio || 1;
-  heatmapCanvas.style.left = `${svgRect.left - parentRect.left}px`;
-  heatmapCanvas.style.top = `${svgRect.top - parentRect.top}px`;
-  heatmapCanvas.style.width = `${svgRect.width}px`;
-  heatmapCanvas.style.height = `${svgRect.height}px`;
-  const targetW = Math.max(1, Math.round(svgRect.width * dpr));
-  const targetH = Math.max(1, Math.round(svgRect.height * dpr));
+  const scale = Math.min(svgRect.width / VIEW_W, svgRect.height / VIEW_H);
+  const renderW = VIEW_W * scale;
+  const renderH = VIEW_H * scale;
+  const offsetX = (svgRect.width - renderW) / 2;
+  const offsetY = (svgRect.height - renderH) / 2;
+  heatmapCanvas.style.left = `${svgRect.left - parentRect.left + offsetX}px`;
+  heatmapCanvas.style.top = `${svgRect.top - parentRect.top + offsetY}px`;
+  heatmapCanvas.style.width = `${renderW}px`;
+  heatmapCanvas.style.height = `${renderH}px`;
+  const targetW = Math.max(1, Math.round(renderW * dpr));
+  const targetH = Math.max(1, Math.round(renderH * dpr));
   if (heatmapCanvas.width !== targetW || heatmapCanvas.height !== targetH) {
     heatmapCanvas.width = targetW;
     heatmapCanvas.height = targetH;
