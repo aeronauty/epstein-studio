@@ -41,3 +41,12 @@ class ArrowItem(models.Model):
     y1 = models.FloatField()
     x2 = models.FloatField()
     y2 = models.FloatField()
+
+
+class PdfDocument(models.Model):
+    """Indexed PDF available for annotation."""
+    filename = models.CharField(max_length=255, db_index=True)
+    path = models.TextField(unique=True)
+
+    def __str__(self) -> str:
+        return self.filename

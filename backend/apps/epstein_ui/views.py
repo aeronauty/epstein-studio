@@ -14,16 +14,41 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.forms import UserCreationForm
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Annotation, TextItem, ArrowItem
+from .models import Annotation, TextItem, ArrowItem, PdfDocument
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 
-def _list_pdfs() -> list[Path]:
+def _list_pdfs_on_disk() -> list[Path]:
     """Return all PDF paths under the shared data directory."""
     if not DATA_DIR.exists():
         return []
     return [p for p in DATA_DIR.rglob("*.pdf") if p.is_file()]
+
+
+def _sync_pdf_index() -> list[PdfDocument]:
+    """Sync the PdfDocument table with PDFs on disk."""
+    pdf_paths = _list_pdfs_on_disk()
+    if not pdf_paths:
+        PdfDocument.objects.all().delete()
+        return []
+
+    seen_paths = {str(p) for p in pdf_paths}
+    existing = {doc.path: doc for doc in PdfDocument.objects.all()}
+
+    to_create = []
+    for path in pdf_paths:
+        path_str = str(path)
+        if path_str not in existing:
+            to_create.append(PdfDocument(path=path_str, filename=path.name))
+    if to_create:
+        PdfDocument.objects.bulk_create(to_create, ignore_conflicts=True)
+
+    stale = set(existing.keys()) - seen_paths
+    if stale:
+        PdfDocument.objects.filter(path__in=stale).delete()
+
+    return list(PdfDocument.objects.filter(path__in=seen_paths))
 
 def _get_pdf_pages(pdf_path: Path) -> int:
     """Best-effort page count using pdfinfo (falls back to 1)."""
@@ -86,11 +111,12 @@ def index(request):
 
 def random_pdf(request):
     """Pick a random PDF and return rendered page metadata."""
-    pdfs = _list_pdfs()
+    pdfs = _sync_pdf_index()
     if not pdfs:
         return JsonResponse({"error": "No PDFs found"}, status=404)
 
-    pdf_path = random.choice(pdfs)
+    pdf_doc = random.choice(pdfs)
+    pdf_path = Path(pdf_doc.path)
     try:
         png_paths = _render_pdf_pages(pdf_path)
     except Exception as exc:
@@ -119,12 +145,12 @@ def search_pdf(request):
     if not query:
         return JsonResponse({"error": "Missing query"}, status=400)
 
-    pdfs = _list_pdfs()
-    matches = [p for p in pdfs if query.lower() in p.name.lower()]
-    if not matches:
+    _sync_pdf_index()
+    match = PdfDocument.objects.filter(filename__icontains=query).first()
+    if not match:
         return JsonResponse({"error": "No match"}, status=404)
 
-    pdf_path = matches[0]
+    pdf_path = Path(match.path)
     try:
         png_paths = _render_pdf_pages(pdf_path)
     except Exception as exc:
