@@ -396,7 +396,23 @@ function ensureAnnotationAnchor(id) {
   }
   anchor.setAttribute("cx", data.x);
   anchor.setAttribute("cy", data.y);
+  updateAnchorSize(anchor);
   return anchor;
+}
+
+function updateAnchorSize(anchor) {
+  if (!anchor) return;
+  const base = 6;
+  const scaled = base / Math.max(0.0001, view.scale);
+  const clamped = Math.max(2, Math.min(10, scaled));
+  anchor.setAttribute("r", clamped.toFixed(3));
+  anchor.setAttribute("vector-effect", "non-scaling-stroke");
+  const stroke = 2 / Math.max(0.0001, view.scale);
+  anchor.setAttribute("stroke-width", stroke.toFixed(3));
+}
+
+function updateAllAnchorSizes() {
+  annotationAnchors.forEach((anchor) => updateAnchorSize(anchor));
 }
 
 function ensureHoverCircle() {
@@ -895,6 +911,7 @@ function setViewportTransform() {
   viewport.setAttribute("transform", `translate(${view.x} ${view.y}) scale(${view.scale})`);
   updateMinimapViewport();
   updateHeatmapTransform();
+  updateAllAnchorSizes();
 }
 
 // --- Heatmap: build in PDF coordinate space, then draw into viewport transform ---
