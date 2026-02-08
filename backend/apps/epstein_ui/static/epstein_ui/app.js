@@ -1152,13 +1152,7 @@ function updateMinimapHeatmap() {
 }
 
 function clampViewX() {
-  const contentWidth = canvasSize.width * view.scale;
-  if (contentWidth <= VIEW_W) {
-    view.x = (VIEW_W - contentWidth) / 2;
-    return;
-  }
-  const minX = VIEW_W - contentWidth;
-  view.x = Math.min(0, Math.max(minX, view.x));
+  return;
 }
 
 function getGroupElements(group) {
