@@ -111,7 +111,7 @@ def _render_pdf_pages(pdf_path: Path) -> list[Path]:
     return rendered
 
 
-def index(request):
+def index(request, pdf_slug=None):
     """Render the single-page UI."""
     return render(request, "epstein_ui/index.html")
 

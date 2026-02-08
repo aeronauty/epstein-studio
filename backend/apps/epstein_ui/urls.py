@@ -1,4 +1,5 @@
 from django.urls import path
+from django.urls import re_path
 from . import views
 
 urlpatterns = [
@@ -10,4 +11,5 @@ urlpatterns = [
     path("logout/", views.logout_view, name="logout"),
     path("annotations/", views.annotations_api, name="annotations_api"),
     path("annotation-votes/", views.annotation_votes, name="annotation_votes"),
+    re_path(r"^(?P<pdf_slug>[A-Za-z0-9_-]+)$", views.index, name="index_pdf"),
 ]

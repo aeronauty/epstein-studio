@@ -1787,6 +1787,10 @@ function syncPages(pages, pdfName) {
   if (pdfName) {
     fileTitle.textContent = pdfName.replace(/\.pdf$/i, "");
     currentPdfKey = pdfName;
+    const slug = pdfName.replace(/\.pdf$/i, "");
+    if (slug) {
+      window.history.replaceState({}, "", `/${encodeURIComponent(slug)}`);
+    }
   }
   loadStateForPdf(currentPdfKey);
 }
@@ -2275,7 +2279,13 @@ if (window.DEBUG_MODE) {
   searchInput.value = DEBUG_PDF_NAME;
   searchPdf();
 } else {
-  fetchRandomPdf();
+  const slug = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  if (slug) {
+    searchInput.value = slug;
+    searchPdf();
+  } else {
+    fetchRandomPdf();
+  }
 }
 window.addEventListener("resize", () => fitToView(true));
 ensureAnnotationMode();
