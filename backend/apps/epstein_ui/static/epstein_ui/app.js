@@ -312,6 +312,26 @@ function updateAnnotationViewVotes(ann) {
   annotationViewDown.disabled = disableVotes;
 }
 
+function updateAnnotationCardVote(ann) {
+  if (!annotationNotes || !ann) return;
+  const card = annotationNotes.querySelector(`.annotation-note[data-annotation="${ann.id}"]`);
+  if (!card) return;
+  const score = card.querySelector(".vote-score");
+  if (score) {
+    score.textContent = (ann.upvotes || 0) - (ann.downvotes || 0);
+  }
+  const upBtn = card.querySelector(".vote-btn.up");
+  const downBtn = card.querySelector(".vote-btn.down");
+  if (upBtn) {
+    upBtn.classList.toggle("active", ann.userVote === 1);
+    upBtn.disabled = !isAuthenticated || !ann.server_id || ann.isOwner;
+  }
+  if (downBtn) {
+    downBtn.classList.toggle("active", ann.userVote === -1);
+    downBtn.disabled = !isAuthenticated || !ann.server_id || ann.isOwner;
+  }
+}
+
 function activateAnnotation(id, { viewOnly = false } = {}) {
   if (!id) return;
   activeAnnotationId = id;
@@ -718,7 +738,10 @@ function renderNotesList() {
       ann.upvotes = result.upvotes;
       ann.downvotes = result.downvotes;
       ann.userVote = result.user_vote || 0;
-      renderNotesList();
+      updateAnnotationCardVote(ann);
+      if (activeAnnotationId === ann.id && activeAnnotationViewOnly) {
+        updateAnnotationViewVotes(ann);
+      }
     });
     downBtn.addEventListener("click", async (evt) => {
       evt.stopPropagation();
@@ -728,7 +751,10 @@ function renderNotesList() {
       ann.upvotes = result.upvotes;
       ann.downvotes = result.downvotes;
       ann.userVote = result.user_vote || 0;
-      renderNotesList();
+      updateAnnotationCardVote(ann);
+      if (activeAnnotationId === ann.id && activeAnnotationViewOnly) {
+        updateAnnotationViewVotes(ann);
+      }
     });
 
     const score = document.createElement("span");
@@ -2870,7 +2896,7 @@ if (annotationViewUp) {
     ann.downvotes = result.downvotes;
     ann.userVote = result.user_vote || 0;
     updateAnnotationViewVotes(ann);
-    renderNotesList();
+    updateAnnotationCardVote(ann);
   });
 }
 
@@ -2886,7 +2912,7 @@ if (annotationViewDown) {
     ann.downvotes = result.downvotes;
     ann.userVote = result.user_vote || 0;
     updateAnnotationViewVotes(ann);
-    renderNotesList();
+    updateAnnotationCardVote(ann);
   });
 }
 
