@@ -204,11 +204,17 @@ def logout_view(request):
     return redirect("index")
 
 
-def _annotation_to_dict(annotation: Annotation) -> dict:
+def _annotation_to_dict(annotation: Annotation, request=None) -> dict:
     """Serialize Annotation and child items for the frontend."""
     votes = list(annotation.votes.all())
     upvotes = sum(1 for v in votes if v.value == 1)
     downvotes = sum(1 for v in votes if v.value == -1)
+    user_vote = 0
+    if request is not None and request.user.is_authenticated:
+        for vote in votes:
+            if vote.user_id == request.user.id:
+                user_vote = vote.value
+                break
     return {
         "id": annotation.client_id,
         "server_id": annotation.id,
@@ -219,6 +225,7 @@ def _annotation_to_dict(annotation: Annotation) -> dict:
         "note": annotation.note or "",
         "upvotes": upvotes,
         "downvotes": downvotes,
+        "user_vote": user_vote,
         "textItems": [
             {
                 "x": item.x,
@@ -254,7 +261,8 @@ def annotations_api(request):
             .select_related("user")
             .prefetch_related("text_items", "arrow_items", "votes")
         )
-        return JsonResponse({"annotations": [_annotation_to_dict(a) for a in annotations]})
+        payload = [_annotation_to_dict(a, request=request) for a in annotations]
+        return JsonResponse({"annotations": payload})
 
     if request.method == "POST":
         if not request.user.is_authenticated:
@@ -350,4 +358,9 @@ def annotation_votes(request):
 
     upvotes = AnnotationVote.objects.filter(annotation=annotation, value=1).count()
     downvotes = AnnotationVote.objects.filter(annotation=annotation, value=-1).count()
-    return JsonResponse({"upvotes": upvotes, "downvotes": downvotes})
+    user_vote = 0
+    try:
+        user_vote = AnnotationVote.objects.get(annotation=annotation, user=request.user).value
+    except AnnotationVote.DoesNotExist:
+        user_vote = 0
+    return JsonResponse({"upvotes": upvotes, "downvotes": downvotes, "user_vote": user_vote})

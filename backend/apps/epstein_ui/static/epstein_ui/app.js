@@ -303,13 +303,19 @@ function renderNotesList() {
     actions.className = "annotation-note-actions";
 
     const upBtn = document.createElement("button");
-    upBtn.className = "vote-btn";
-    upBtn.textContent = `▲ ${ann.upvotes || 0}`;
+    upBtn.className = "vote-btn up";
+    upBtn.innerHTML = `<img class="vote-icon" src="/static/epstein_ui/icons/arrow-big-up.svg" alt="" />`;
+    if (ann.userVote === 1) {
+      upBtn.classList.add("active");
+    }
     upBtn.disabled = !isAuthenticated || !ann.server_id;
 
     const downBtn = document.createElement("button");
-    downBtn.className = "vote-btn";
-    downBtn.textContent = `▼ ${ann.downvotes || 0}`;
+    downBtn.className = "vote-btn down";
+    downBtn.innerHTML = `<img class="vote-icon" src="/static/epstein_ui/icons/arrow-big-down.svg" alt="" />`;
+    if (ann.userVote === -1) {
+      downBtn.classList.add("active");
+    }
     downBtn.disabled = !isAuthenticated || !ann.server_id;
 
     upBtn.addEventListener("click", async () => {
@@ -318,6 +324,7 @@ function renderNotesList() {
       if (!result) return;
       ann.upvotes = result.upvotes;
       ann.downvotes = result.downvotes;
+      ann.userVote = result.user_vote || 0;
       renderNotesList();
     });
     downBtn.addEventListener("click", async () => {
@@ -326,11 +333,17 @@ function renderNotesList() {
       if (!result) return;
       ann.upvotes = result.upvotes;
       ann.downvotes = result.downvotes;
+      ann.userVote = result.user_vote || 0;
       renderNotesList();
     });
 
+    const score = document.createElement("span");
+    score.className = "vote-score";
+    score.textContent = (ann.upvotes || 0) - (ann.downvotes || 0);
+
     actions.appendChild(upBtn);
     actions.appendChild(downBtn);
+    actions.appendChild(score);
     wrapper.appendChild(meta);
     wrapper.appendChild(text);
     wrapper.appendChild(actions);
@@ -1335,6 +1348,7 @@ async function loadAnnotationsForPdf(pdfName) {
         user: ann.user || "",
         upvotes: ann.upvotes || 0,
         downvotes: ann.downvotes || 0,
+        userVote: ann.user_vote || 0,
       });
       (ann.textItems || []).forEach((item) => {
         textItems.push({
