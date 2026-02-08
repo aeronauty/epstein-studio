@@ -133,7 +133,44 @@ function ensureAnnotationMode() {
     hideAnnotationControls();
   } else {
     showAnnotationControls();
+    ensureAnnotationAnchor(activeAnnotationId);
   }
+  updateAnnotationVisibility();
+}
+
+function updateAnnotationVisibility() {
+  if (activeAnnotationId) {
+    if (heatmapCanvas) {
+      heatmapCanvas.style.display = "none";
+    }
+    annotations.forEach((_, id) => {
+      const isActive = id === activeAnnotationId;
+      setAnnotationElementsVisible(id, isActive);
+      const anchor = annotationAnchors.get(id);
+      if (anchor) {
+        if (isActive) {
+          anchor.style.display = "";
+          anchor.style.opacity = "0.35";
+        } else {
+          anchor.style.display = "none";
+          anchor.style.opacity = "";
+        }
+      }
+    });
+    return;
+  }
+
+  if (heatmapCanvas) {
+    heatmapCanvas.style.display = "";
+  }
+  annotations.forEach((_, id) => {
+    setAnnotationElementsVisible(id, false);
+    const anchor = annotationAnchors.get(id);
+    if (anchor) {
+      anchor.style.display = "";
+      anchor.style.opacity = "";
+    }
+  });
 }
 
 // Find all visual elements that belong to one annotation.
@@ -147,7 +184,7 @@ function getAnnotationElements(id) {
   return { textItems, hintItems };
 }
 
-// Hide/show annotation elements (anchors stay visible when collapsed).
+// Hide/show annotation elements (anchors are controlled separately).
 function setAnnotationElementsVisible(id, visible) {
   const { textItems, hintItems } = getAnnotationElements(id);
   textItems.forEach((group) => {
@@ -156,10 +193,6 @@ function setAnnotationElementsVisible(id, visible) {
   hintItems.forEach((group) => {
     group.style.display = visible ? "" : "none";
   });
-  const anchor = annotationAnchors.get(id);
-  if (anchor) {
-    anchor.style.display = visible ? "none" : "";
-  }
 }
 
 // Create or update the annotation anchor dot.
@@ -1563,7 +1596,7 @@ svg.addEventListener("pointerdown", (evt) => {
     activeAnnotationId = `ann_${Date.now()}_${annotationCounter}`;
     annotations.set(activeAnnotationId, { id: activeAnnotationId, x: point.x, y: point.y });
     stopAnnotationCreate();
-    showAnnotationControls();
+    ensureAnnotationMode();
     setActiveTab("notes");
     evt.preventDefault();
     return;
