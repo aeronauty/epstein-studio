@@ -337,9 +337,15 @@ body {
 .browse-meta {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.browse-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .browse-meta img {

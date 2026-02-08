@@ -27,13 +27,28 @@ function appendCard(item) {
   name.textContent = item.filename;
   const meta = document.createElement("div");
   meta.className = "browse-meta";
-  const icon = document.createElement("img");
-  icon.src = "/static/epstein_ui/icons/thumbs-up.svg";
-  icon.alt = "";
-  const count = document.createElement("span");
-  count.textContent = item.upvotes ?? 0;
-  meta.appendChild(icon);
-  meta.appendChild(count);
+  const voteWrap = document.createElement("span");
+  voteWrap.className = "browse-meta-item";
+  const voteIcon = document.createElement("img");
+  voteIcon.src = "/static/epstein_ui/icons/thumbs-up.svg";
+  voteIcon.alt = "";
+  const voteCount = document.createElement("span");
+  voteCount.textContent = item.upvotes ?? 0;
+  voteWrap.appendChild(voteIcon);
+  voteWrap.appendChild(voteCount);
+
+  const annWrap = document.createElement("span");
+  annWrap.className = "browse-meta-item";
+  const annIcon = document.createElement("img");
+  annIcon.src = "/static/epstein_ui/icons/pencil.svg";
+  annIcon.alt = "";
+  const annCount = document.createElement("span");
+  annCount.textContent = item.annotations ?? 0;
+  annWrap.appendChild(annIcon);
+  annWrap.appendChild(annCount);
+
+  meta.appendChild(voteWrap);
+  meta.appendChild(annWrap);
   link.appendChild(name);
   link.appendChild(meta);
   list.appendChild(link);

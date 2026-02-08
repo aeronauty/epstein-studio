@@ -14,7 +14,8 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.forms import UserCreationForm
 from django.views.decorators.csrf import csrf_exempt
 from django.db.utils import OperationalError, ProgrammingError
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Value, IntegerField, F, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 
 from .models import Annotation, TextItem, ArrowItem, PdfDocument, AnnotationVote, AnnotationComment, CommentVote, PdfVote
 
@@ -230,38 +231,45 @@ def browse_list(request):
         _sync_pdf_index()
     except (OperationalError, ProgrammingError):
         pass
-    qs = PdfDocument.objects.order_by("filename")
+    qs = PdfDocument.objects.all()
     if query:
         qs = qs.filter(filename__icontains=query)
+    ann_count = Subquery(
+        Annotation.objects.filter(pdf_key=OuterRef("filename"))
+        .values("pdf_key")
+        .annotate(total=Count("id"))
+        .values("total")[:1],
+        output_field=IntegerField(),
+    )
+    qs = qs.annotate(
+        ann_total=Coalesce(ann_count, Value(0)),
+        upvotes=Count("votes", filter=Q(votes__value=1), distinct=True),
+        downvotes=Count("votes", filter=Q(votes__value=-1), distinct=True),
+    ).annotate(vote_score=F("upvotes") - F("downvotes"))
+    if sort == "promising":
+        qs = qs.order_by("-vote_score", "filename")
+    elif sort == "least":
+        qs = qs.order_by("vote_score", "filename")
+    elif sort == "ann_most":
+        qs = qs.order_by("-ann_total", "filename")
+    elif sort == "ann_least":
+        qs = qs.order_by("ann_total", "filename")
+    else:
+        qs = qs.order_by("filename")
+
     total = qs.count()
     start = (page_num - 1) * page_size
     end = start + page_size
-    docs = list(qs[start:end])
-    doc_ids = [doc.id for doc in docs]
-    vote_map = {}
-    if doc_ids:
-        vote_rows = (
-            PdfVote.objects.filter(pdf_id__in=doc_ids)
-            .values("pdf_id")
-            .annotate(
-                upvotes=Count("id", filter=Q(value=1)),
-                downvotes=Count("id", filter=Q(value=-1)),
-            )
-        )
-        vote_map = {
-            row["pdf_id"]: (row["upvotes"] or 0) - (row["downvotes"] or 0)
-            for row in vote_rows
-        }
+    docs = list(qs.values("filename", "vote_score", "ann_total")[start:end])
     items = [
         {
-            "filename": doc.filename,
-            "slug": doc.filename.replace(".pdf", ""),
-            "upvotes": vote_map.get(doc.id, 0),
+            "filename": doc["filename"],
+            "slug": doc["filename"].replace(".pdf", ""),
+            "upvotes": doc["vote_score"] or 0,
+            "annotations": doc["ann_total"] or 0,
         }
         for doc in docs
     ]
-    if sort in ("promising", "least"):
-        items.sort(key=lambda item: item["upvotes"], reverse=sort == "promising")
     has_more = end < total
     return JsonResponse({"items": items, "page": page_num, "has_more": has_more})
 
