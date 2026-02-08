@@ -397,6 +397,8 @@ def annotation_votes(request):
         annotation = Annotation.objects.get(id=annotation_id)
     except Annotation.DoesNotExist:
         return JsonResponse({"error": "Not found"}, status=404)
+    if annotation.user_id == request.user.id:
+        return JsonResponse({"error": "Cannot vote own annotation"}, status=403)
 
     vote, created = AnnotationVote.objects.get_or_create(
         annotation=annotation,
@@ -525,6 +527,8 @@ def comment_votes(request):
         comment = AnnotationComment.objects.get(id=comment_id)
     except AnnotationComment.DoesNotExist:
         return JsonResponse({"error": "Not found"}, status=404)
+    if comment.user_id == request.user.id:
+        return JsonResponse({"error": "Cannot vote own comment"}, status=403)
 
     vote, created = CommentVote.objects.get_or_create(
         comment=comment,
