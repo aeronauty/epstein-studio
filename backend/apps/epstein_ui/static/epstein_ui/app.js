@@ -345,7 +345,7 @@ function updateAnnotationVisibility() {
     setAnnotationElementsVisible(id, false);
     const anchor = annotationAnchors.get(id);
     if (anchor) {
-      anchor.style.display = "";
+      anchor.style.display = "none";
       anchor.style.opacity = "";
     }
   });
@@ -2469,6 +2469,11 @@ svg.addEventListener("mouseenter", () => {
 svg.addEventListener("mouseleave", () => {
   if (hoverCircle) hoverCircle.style.display = "none";
   lastHoverPoint = null;
+  if (!activeAnnotationId) {
+    annotationAnchors.forEach((anchor) => {
+      anchor.style.display = "none";
+    });
+  }
 });
 
 svg.addEventListener("mousemove", (evt) => {
@@ -2482,6 +2487,16 @@ svg.addEventListener("mousemove", (evt) => {
   const radius = 30 / Math.max(0.0001, pxPerSvg * view.scale);
   circle.setAttribute("r", radius.toFixed(3));
   circle.style.display = "";
+  if (!activeAnnotationId) {
+    annotationAnchors.forEach((anchor) => {
+      const cx = parseFloat(anchor.getAttribute("cx") || "0");
+      const cy = parseFloat(anchor.getAttribute("cy") || "0");
+      const dx = cx - point.x;
+      const dy = cy - point.y;
+      const inside = dx * dx + dy * dy <= radius * radius;
+      anchor.style.display = inside ? "" : "none";
+    });
+  }
   renderHeatmap();
 });
 
