@@ -1,6 +1,6 @@
 // --- DOM references ---
 const svg = document.getElementById("overlay");
-window.DEBUG_MODE = true;
+window.DEBUG_MODE = false;
 const DEBUG_PDF_NAME = "EFTA02731646.pdf";
 const viewport = document.getElementById("viewport");
 const pdfPages = document.getElementById("pdfPages");
@@ -458,7 +458,9 @@ function applyStylesToGroup(group) {
   editor.style.fontFamily = fontSelect.value;
   group.dataset.font = fontSelect.value;
   editor.style.fontSize = `${sizeRange.value}px`;
-  sizeInput.value = sizeRange.value;
+  if (document.activeElement !== sizeInput) {
+    sizeInput.value = sizeRange.value;
+  }
   editor.style.fontWeight = boldToggle.classList.contains("active") ? "700" : "400";
   editor.style.fontStyle = italicToggle.classList.contains("active") ? "italic" : "normal";
   const kerningOn = kerningToggle.classList.contains("active");
@@ -1463,17 +1465,25 @@ fontSelect.addEventListener("change", () => {
 });
 sizeRange.addEventListener("input", () => {
   if (activeGroup) {
-    sizeInput.value = sizeRange.value;
+    if (document.activeElement !== sizeInput) {
+      sizeInput.value = sizeRange.value;
+    }
     applyStylesToGroup(activeGroup);
   }
 });
 sizeInput.addEventListener("input", () => {
-  const value = parseFloat(sizeInput.value);
-  if (!Number.isNaN(value)) {
-    sizeRange.value = value;
-    if (activeGroup) {
-      applyStylesToGroup(activeGroup);
-    }
+  const raw = sizeInput.value.trim();
+  if (!raw || raw === "-" || raw === "." || raw === "-.") return;
+  if (raw.endsWith(".")) return;
+  const value = parseFloat(raw);
+  if (Number.isNaN(value)) return;
+  const min = parseFloat(sizeInput.min || "0");
+  const max = parseFloat(sizeInput.max || "0");
+  if (!Number.isNaN(min) && value < min) return;
+  if (!Number.isNaN(max) && value > max) return;
+  sizeRange.value = value;
+  if (activeGroup) {
+    applyStylesToGroup(activeGroup);
   }
 });
 kerningToggle.addEventListener("click", () => {
@@ -1526,7 +1536,7 @@ searchInput.addEventListener("input", () => {
       suggestionsList.innerHTML = "";
       (data.suggestions || []).forEach((name) => {
         const option = document.createElement("option");
-        option.value = name;
+        option.value = name.replace(/\.pdf$/i, "");
         suggestionsList.appendChild(option);
       });
     } catch (err) {
