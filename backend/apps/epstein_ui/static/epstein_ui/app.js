@@ -482,6 +482,18 @@ function updateAllAnchorSizes() {
   annotationAnchors.forEach((anchor) => updateAnchorSize(anchor));
 }
 
+function isAnchorInsideHoverCircle(anchor) {
+  if (!anchor || !lastHoverPoint || !hoverCircle || hoverCircle.style.display === "none") {
+    return false;
+  }
+  const radius = parseFloat(hoverCircle.getAttribute("r") || "0");
+  const cx = parseFloat(anchor.getAttribute("cx") || "0");
+  const cy = parseFloat(anchor.getAttribute("cy") || "0");
+  const dx = cx - lastHoverPoint.x;
+  const dy = cy - lastHoverPoint.y;
+  return dx * dx + dy * dy <= radius * radius;
+}
+
 function ensureHoverCircle() {
   if (hoverCircle) return hoverCircle;
   hoverCircle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -681,7 +693,9 @@ function renderNotesList() {
     wrapper.addEventListener("mouseenter", () => {
       const anchor = annotationAnchors.get(ann.id);
       if (anchor) {
-        anchor.setAttribute("r", "10");
+        anchor.style.display = "";
+        anchor.dataset.hovered = "1";
+        updateAnchorSize(anchor);
       }
       if (!activeAnnotationId && !activeAnnotationViewOnly) {
         setAnnotationElementsVisible(ann.id, true);
@@ -690,7 +704,11 @@ function renderNotesList() {
     wrapper.addEventListener("mouseleave", () => {
       const anchor = annotationAnchors.get(ann.id);
       if (anchor) {
-        anchor.setAttribute("r", "6");
+        delete anchor.dataset.hovered;
+        updateAnchorSize(anchor);
+        if (!activeAnnotationId && !isAnchorInsideHoverCircle(anchor)) {
+          anchor.style.display = "none";
+        }
       }
       if (!activeAnnotationId && !activeAnnotationViewOnly) {
         setAnnotationElementsVisible(ann.id, false);
