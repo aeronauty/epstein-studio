@@ -104,6 +104,7 @@ let commentCache = new Map();
 let pendingConfirm = null;
 let hoverCircle = null;
 let lastHoverPoint = null;
+let hoveredAnchorId = null;
 
 function formatTimestamp(value, { dateOnly = false } = {}) {
   if (!value) return "";
@@ -389,6 +390,25 @@ function showAnnotationPreview(id) {
   });
 }
 
+function clearHoveredAnchor(id) {
+  const targetId = id || hoveredAnchorId;
+  if (!targetId) return;
+  const anchor = annotationAnchors.get(targetId);
+  if (anchor) {
+    delete anchor.dataset.hovered;
+    updateAnchorSize(anchor);
+  }
+  const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${targetId}"]`);
+  if (card) card.classList.remove("hovered");
+  if (!activeAnnotationId && !activeAnnotationViewOnly) {
+    setAnnotationElementsVisible(targetId, false);
+  }
+  const header = annotationNotes?.querySelector(".annotation-selected-title");
+  if (header) header.remove();
+  hoveredAnchorId = null;
+  renderNotesList();
+}
+
 // Create or update the annotation anchor dot.
 function ensureAnnotationAnchor(id) {
   const data = annotations.get(id);
@@ -411,43 +431,38 @@ function ensureAnnotationAnchor(id) {
   anchor.setAttribute("cx", data.x);
   anchor.setAttribute("cy", data.y);
   updateAnchorSize(anchor);
-  anchor.addEventListener("mouseenter", () => {
-    const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
-    if (card) card.classList.add("hovered");
-    hintLayer.appendChild(anchor);
-    anchor.dataset.hovered = "1";
-    updateAnchorSize(anchor);
-    if (!activeAnnotationId && !activeAnnotationViewOnly) {
-      showAnnotationPreview(id);
-    }
-    if (annotationNotes) {
-      let header = annotationNotes.querySelector(".annotation-selected-title");
-      if (!header) {
-        header = document.createElement("div");
-        header.className = "annotation-section-title annotation-selected-title";
-        header.textContent = "Selected Annotation";
+  if (!anchor.dataset.bound) {
+    anchor.dataset.bound = "1";
+    anchor.addEventListener("mouseenter", () => {
+      hoveredAnchorId = id;
+      const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
+      if (card) card.classList.add("hovered");
+      hintLayer.appendChild(anchor);
+      anchor.dataset.hovered = "1";
+      updateAnchorSize(anchor);
+      if (!activeAnnotationId && !activeAnnotationViewOnly) {
+        showAnnotationPreview(id);
       }
-      const card = annotationNotes.querySelector(`.annotation-note[data-annotation="${id}"]`);
-      if (card) {
-        annotationNotes.prepend(card);
-        annotationNotes.insertBefore(header, card);
-      } else {
-        annotationNotes.prepend(header);
+      if (annotationNotes) {
+        let header = annotationNotes.querySelector(".annotation-selected-title");
+        if (!header) {
+          header = document.createElement("div");
+          header.className = "annotation-section-title annotation-selected-title";
+          header.textContent = "Selected Annotation";
+        }
+        const card = annotationNotes.querySelector(`.annotation-note[data-annotation="${id}"]`);
+        if (card) {
+          annotationNotes.prepend(card);
+          annotationNotes.insertBefore(header, card);
+        } else {
+          annotationNotes.prepend(header);
+        }
       }
-    }
-  });
-  anchor.addEventListener("mouseleave", () => {
-    const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
-    if (card) card.classList.remove("hovered");
-    delete anchor.dataset.hovered;
-    updateAnchorSize(anchor);
-    if (!activeAnnotationId && !activeAnnotationViewOnly) {
-      setAnnotationElementsVisible(id, false);
-    }
-    const header = annotationNotes?.querySelector(".annotation-selected-title");
-    if (header) header.remove();
-    renderNotesList();
-  });
+    });
+    anchor.addEventListener("mouseleave", () => {
+      clearHoveredAnchor(id);
+    });
+  }
   return anchor;
 }
 
@@ -2557,6 +2572,7 @@ svg.addEventListener("mouseenter", () => {
 svg.addEventListener("mouseleave", () => {
   if (hoverCircle) hoverCircle.style.display = "none";
   lastHoverPoint = null;
+  clearHoveredAnchor();
   if (!activeAnnotationId) {
     annotationAnchors.forEach((anchor) => {
       anchor.style.display = "none";
@@ -2583,6 +2599,9 @@ svg.addEventListener("mousemove", (evt) => {
       const dy = cy - point.y;
       const inside = dx * dx + dy * dy <= radius * radius;
       anchor.style.display = inside ? "" : "none";
+      if (!inside && hoveredAnchorId === anchor.dataset.annotation) {
+        clearHoveredAnchor(anchor.dataset.annotation);
+      }
     });
   }
   renderHeatmap();
