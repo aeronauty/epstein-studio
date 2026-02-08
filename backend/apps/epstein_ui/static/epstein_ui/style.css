@@ -131,8 +131,21 @@ body {
   white-space: pre-wrap;
 }
 
-#annotationViewBack {
+.annotation-view-actions {
   margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.annotation-view-votes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#annotationViewBack {
   align-self: flex-end;
   width: auto;
 }

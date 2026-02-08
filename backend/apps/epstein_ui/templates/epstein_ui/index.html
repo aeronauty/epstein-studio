@@ -69,7 +69,18 @@
               <div id="annotationViewTitle" class="annotation-view-title hidden"></div>
               <div id="annotationViewHash" class="annotation-view-hash hidden"></div>
               <div id="annotationViewNote" class="annotation-view-note hidden"></div>
-              <button id="annotationViewBack" class="btn btn-outline hidden" type="button">Back</button>
+              <div id="annotationViewActions" class="annotation-view-actions hidden">
+                <div class="annotation-view-votes">
+                  <button id="annotationViewUp" class="vote-btn up" type="button">
+                    <img class="vote-icon" src="/static/epstein_ui/icons/arrow-big-up.svg" alt="" />
+                  </button>
+                  <button id="annotationViewDown" class="vote-btn down" type="button">
+                    <img class="vote-icon" src="/static/epstein_ui/icons/arrow-big-down.svg" alt="" />
+                  </button>
+                  <span id="annotationViewScore" class="vote-score">0</span>
+                </div>
+                <button id="annotationViewBack" class="btn btn-outline" type="button">Back</button>
+              </div>
               <div id="discussionPanel" class="discussion-panel hidden">
                 <div class="discussion-body">
                   <div class="discussion-title">Discussion</div>

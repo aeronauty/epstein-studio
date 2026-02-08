@@ -45,6 +45,10 @@ const colorSwatch = document.getElementById("colorSwatch");
 const annotationTabs = document.getElementById("annotationTabs");
 const annotationViewTitle = document.getElementById("annotationViewTitle");
 const annotationViewHash = document.getElementById("annotationViewHash");
+const annotationViewActions = document.getElementById("annotationViewActions");
+const annotationViewUp = document.getElementById("annotationViewUp");
+const annotationViewDown = document.getElementById("annotationViewDown");
+const annotationViewScore = document.getElementById("annotationViewScore");
 const annotationViewNote = document.getElementById("annotationViewNote");
 const annotationViewBack = document.getElementById("annotationViewBack");
 const confirmOverlay = document.getElementById("confirmOverlay");
@@ -227,7 +231,7 @@ function updateAnnotationPanelMode() {
     if (annotationViewTitle) annotationViewTitle.classList.add("hidden");
     if (annotationViewHash) annotationViewHash.classList.add("hidden");
     if (annotationViewNote) annotationViewNote.classList.add("hidden");
-    if (annotationViewBack) annotationViewBack.classList.add("hidden");
+    if (annotationViewActions) annotationViewActions.classList.add("hidden");
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
     tabsList.forEach((tab) => {
@@ -247,7 +251,7 @@ function updateAnnotationPanelMode() {
     if (annotationViewTitle) annotationViewTitle.classList.remove("hidden");
     if (annotationViewHash) annotationViewHash.classList.remove("hidden");
     if (annotationViewNote) annotationViewNote.classList.remove("hidden");
-    if (annotationViewBack) annotationViewBack.classList.remove("hidden");
+    if (annotationViewActions) annotationViewActions.classList.remove("hidden");
     if (discussionPanel) discussionPanel.classList.remove("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
     if (notesInput) notesInput.closest(".field")?.classList.add("hidden");
@@ -281,7 +285,7 @@ function updateAnnotationPanelMode() {
       annotationViewHash.classList.toggle("hidden", !ann?.hash);
     }
     if (annotationViewNote) annotationViewNote.classList.add("hidden");
-    if (annotationViewBack) annotationViewBack.classList.add("hidden");
+    if (annotationViewActions) annotationViewActions.classList.add("hidden");
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
     if (notesInput) notesInput.classList.remove("hidden");
@@ -297,6 +301,17 @@ function updateAnnotationPanelMode() {
   }
 }
 
+function updateAnnotationViewVotes(ann) {
+  if (!annotationViewUp || !annotationViewDown || !annotationViewScore) return;
+  const score = (ann?.upvotes || 0) - (ann?.downvotes || 0);
+  annotationViewScore.textContent = score;
+  annotationViewUp.classList.toggle("active", ann?.userVote === 1);
+  annotationViewDown.classList.toggle("active", ann?.userVote === -1);
+  const disableVotes = !isAuthenticated || !ann?.server_id || ann?.isOwner;
+  annotationViewUp.disabled = disableVotes;
+  annotationViewDown.disabled = disableVotes;
+}
+
 function activateAnnotation(id, { viewOnly = false } = {}) {
   if (!id) return;
   activeAnnotationId = id;
@@ -310,6 +325,9 @@ function activateAnnotation(id, { viewOnly = false } = {}) {
   }
   if (annotationViewHash && ann) {
     annotationViewHash.textContent = ann.hash ? `${ann.hash}` : "";
+  }
+  if (activeAnnotationViewOnly) {
+    updateAnnotationViewVotes(ann);
   }
   ensureAnnotationMode();
   setAnnotationElementsVisible(id, true);
@@ -499,6 +517,22 @@ function updateAnchorSize(anchor) {
 
 function updateAllAnchorSizes() {
   annotationAnchors.forEach((anchor) => updateAnchorSize(anchor));
+}
+
+function findAnchorAtPoint(point, hitRadius = 10) {
+  if (!point) return null;
+  const r = hitRadius / Math.max(0.0001, view.scale);
+  for (const anchor of annotationAnchors.values()) {
+    if (!anchor || anchor.style.display === "none") continue;
+    const cx = parseFloat(anchor.getAttribute("cx") || "0");
+    const cy = parseFloat(anchor.getAttribute("cy") || "0");
+    const dx = cx - point.x;
+    const dy = cy - point.y;
+    if (dx * dx + dy * dy <= r * r) {
+      return anchor;
+    }
+  }
+  return null;
 }
 
 function isAnchorInsideHoverCircle(anchor) {
@@ -2417,6 +2451,17 @@ notesInput.addEventListener("input", () => {
 });
 
 textLayer.addEventListener("pointerdown", (evt) => {
+  const hitPoint = svgPointInViewport(evt);
+  const hitAnchor = findAnchorAtPoint(hitPoint, 12);
+  if (hitAnchor) {
+    const annId = hitAnchor.dataset.annotation;
+    if (annId) {
+      activateAnnotation(annId, { viewOnly: true });
+      evt.preventDefault();
+      evt.stopPropagation();
+      return;
+    }
+  }
   const group = evt.target.closest(".text-group");
   if (group) {
     if (group.dataset.annotation) {
@@ -2459,12 +2504,7 @@ hintLayer.addEventListener("pointerdown", (evt) => {
   if (anchor) {
     const annId = anchor.dataset.annotation;
     if (annId) {
-      const ann = annotations.get(annId);
-      if (!isAuthenticated || (ann && ann.isOwner === false)) {
-        activateAnnotation(annId, { viewOnly: true });
-      } else {
-        activateAnnotation(annId, { viewOnly: false });
-      }
+      activateAnnotation(annId, { viewOnly: true });
     }
     evt.preventDefault();
     evt.stopPropagation();
@@ -2815,6 +2855,38 @@ discardAnnotationBtn.addEventListener("click", () => {
 if (annotationViewBack) {
   annotationViewBack.addEventListener("click", () => {
     clearActiveAnnotation();
+  });
+}
+
+if (annotationViewUp) {
+  annotationViewUp.addEventListener("click", async (evt) => {
+    evt.stopPropagation();
+    if (!activeAnnotationId) return;
+    const ann = annotations.get(activeAnnotationId);
+    if (!ann || ann.isOwner || !ann.server_id) return;
+    const result = await sendVote(ann.server_id, 1);
+    if (!result) return;
+    ann.upvotes = result.upvotes;
+    ann.downvotes = result.downvotes;
+    ann.userVote = result.user_vote || 0;
+    updateAnnotationViewVotes(ann);
+    renderNotesList();
+  });
+}
+
+if (annotationViewDown) {
+  annotationViewDown.addEventListener("click", async (evt) => {
+    evt.stopPropagation();
+    if (!activeAnnotationId) return;
+    const ann = annotations.get(activeAnnotationId);
+    if (!ann || ann.isOwner || !ann.server_id) return;
+    const result = await sendVote(ann.server_id, -1);
+    if (!result) return;
+    ann.upvotes = result.upvotes;
+    ann.downvotes = result.downvotes;
+    ann.userVote = result.user_vote || 0;
+    updateAnnotationViewVotes(ann);
+    renderNotesList();
   });
 }
 
