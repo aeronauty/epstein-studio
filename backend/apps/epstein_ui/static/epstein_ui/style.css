@@ -179,6 +179,14 @@ body {
   align-items: center;
 }
 
+.annotation-section-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin: 6px 0 2px;
+}
+
 .vote-btn {
   background: transparent;
   border: 1px solid #2a3236;

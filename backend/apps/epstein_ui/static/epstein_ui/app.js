@@ -389,14 +389,30 @@ function renderNotesList() {
   annotationNotes.innerHTML = "";
   const items = Array.from(annotations.values()).filter((ann) => (ann.note || "").trim().length > 0);
   if (!items.length) return;
-  items.forEach((ann) => {
+
+  const mine = items.filter((ann) => ann.isOwner);
+  const others = items.filter((ann) => !ann.isOwner);
+
+  const renderSection = (title, list, showHeader) => {
+    if (!list.length) return;
+    if (showHeader) {
+      const header = document.createElement("div");
+      header.className = "annotation-section-title";
+      header.textContent = title;
+      annotationNotes.appendChild(header);
+    }
+    list.forEach((ann) => {
     const wrapper = document.createElement("div");
     wrapper.className = "annotation-note";
     wrapper.dataset.annotation = ann.id;
 
     const meta = document.createElement("div");
     meta.className = "annotation-note-meta";
-    meta.textContent = ann.user ? `By ${ann.user}` : "By Unknown";
+    if (ann.isOwner) {
+      meta.textContent = "By you";
+    } else {
+      meta.textContent = ann.user ? `By ${ann.user}` : "By Unknown";
+    }
 
     const text = document.createElement("div");
     text.className = "annotation-note-text";
@@ -472,7 +488,11 @@ function renderNotesList() {
       }
       activateAnnotation(ann.id, { viewOnly: true });
     });
-  });
+    });
+  };
+
+  renderSection("Your annotations", mine, mine.length > 0);
+  renderSection("Other annotations", others, mine.length > 0);
 }
 
 async function sendVote(annotationId, value) {
