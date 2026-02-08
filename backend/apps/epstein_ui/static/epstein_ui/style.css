@@ -860,11 +860,20 @@ image {
   stroke: #0a120a;
   stroke-width: 2;
   cursor: pointer;
+  fill-opacity: 0.6;
+  stroke-opacity: 0.9;
+  transition: fill-opacity 0.12s ease, stroke-opacity 0.12s ease;
 }
 
 .annotation-anchor.annotation-anchor-other {
   fill: #ffd84d;
   stroke: #2a2204;
+}
+
+.annotation-anchor:hover,
+.annotation-anchor[data-hovered="1"] {
+  fill-opacity: 1;
+  stroke-opacity: 1;
 }
 
 .hover-circle {
