@@ -149,6 +149,7 @@ if (!isAuthenticated) {
   });
   if (createAnnotationBtn) createAnnotationBtn.disabled = true;
 }
+updateCreateAnnotationButton();
 
 function showAnnotationControls() {
   annotationControls.classList.remove("hidden");
@@ -158,6 +159,17 @@ function showAnnotationControls() {
 function hideAnnotationControls() {
   annotationControls.classList.add("hidden");
   createAnnotationBtn.classList.remove("hidden");
+}
+
+function updateCreateAnnotationButton() {
+  if (!createAnnotationBtn) return;
+  if (annotationCreateMode) {
+    createAnnotationBtn.textContent = "Cancel";
+    createAnnotationBtn.classList.add("btn-outline");
+  } else {
+    createAnnotationBtn.textContent = "Create Annotation";
+    createAnnotationBtn.classList.remove("btn-outline");
+  }
 }
 
 function showAnnotationPrompt() {
@@ -172,6 +184,10 @@ function hideAnnotationPrompt() {
 function startAnnotationCreate() {
   annotationCreateMode = true;
   showAnnotationPrompt();
+  updateCreateAnnotationButton();
+  if (hoverCircle) hoverCircle.style.display = "none";
+  lastHoverPoint = null;
+  renderHeatmap();
   if (!annotationPreview) {
     annotationPreview = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     annotationPreview.classList.add("annotation-preview");
@@ -184,6 +200,7 @@ function startAnnotationCreate() {
 function stopAnnotationCreate() {
   annotationCreateMode = false;
   hideAnnotationPrompt();
+  updateCreateAnnotationButton();
   if (annotationPreview) {
     annotationPreview.remove();
     annotationPreview = null;
@@ -1124,7 +1141,7 @@ function renderHeatmap() {
     translateY
   );
   heatmapCtx.drawImage(heatmapBase, 0, 0);
-  if (lastHoverPoint) {
+  if (lastHoverPoint && canShowHoverOverlay()) {
     const radiusSvg = 29 / Math.max(0.0001, scaleX);
     heatmapCtx.save();
     heatmapCtx.globalCompositeOperation = "destination-out";
@@ -1426,6 +1443,10 @@ function updateMinimapViewport() {
   minimapViewport.setAttribute("y", y);
   minimapViewport.setAttribute("width", width);
   minimapViewport.setAttribute("height", height);
+}
+
+function canShowHoverOverlay() {
+  return !activeAnnotationId && !annotationCreateMode;
 }
 
 function getDefaultViewScale() {
@@ -2631,6 +2652,11 @@ minimapPageInput.addEventListener("change", () => {
 });
 
 svg.addEventListener("mouseenter", () => {
+  if (!canShowHoverOverlay()) {
+    if (hoverCircle) hoverCircle.style.display = "none";
+    lastHoverPoint = null;
+    return;
+  }
   const circle = ensureHoverCircle();
   circle.style.display = "";
 });
@@ -2647,6 +2673,12 @@ svg.addEventListener("mouseleave", () => {
 });
 
 svg.addEventListener("mousemove", (evt) => {
+  if (!canShowHoverOverlay()) {
+    if (hoverCircle) hoverCircle.style.display = "none";
+    lastHoverPoint = null;
+    renderHeatmap();
+    return;
+  }
   const circle = ensureHoverCircle();
   if (hoveredAnchorId) {
     const overAnchor = evt.target.closest(".annotation-anchor");
@@ -2680,6 +2712,7 @@ svg.addEventListener("mousemove", (evt) => {
 });
 
 svg.addEventListener("wheel", () => {
+  if (!canShowHoverOverlay()) return;
   if (!hoverCircle || !lastHoverPoint) return;
   const svgRect = svg.getBoundingClientRect();
   const pxPerSvg = svgRect.width / VIEW_W;
@@ -2762,7 +2795,11 @@ tabs.forEach((tab) => {
 
 createAnnotationBtn.addEventListener("click", () => {
   if (!isAuthenticated) return;
-  startAnnotationCreate();
+  if (annotationCreateMode) {
+    stopAnnotationCreate();
+  } else {
+    startAnnotationCreate();
+  }
 });
 
 commitAnnotationBtn.addEventListener("click", () => {
