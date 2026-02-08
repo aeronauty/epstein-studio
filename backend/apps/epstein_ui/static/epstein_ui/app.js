@@ -214,38 +214,45 @@ function ensureAnnotationAnchor(id) {
 }
 
 // Drop active annotation and its elements, then persist.
-function discardActiveAnnotation() {
-  if (!activeAnnotationId) return;
-  const id = activeAnnotationId;
-  const textItems = Array.from(textLayer.querySelectorAll(".text-group"));
-  textItems.forEach((group) => {
-    if (group.dataset.annotation === id) {
-      group.remove();
-    }
-  });
-  const hintItems = Array.from(hintLayer.querySelectorAll("g"));
-  hintItems.forEach((group) => {
-    if (group.dataset.annotation === id) {
-      group.remove();
-    }
-  });
+function removeAnnotationById(id, { persist = true } = {}) {
+  if (!id) return;
+  const { textItems, hintItems } = getAnnotationElements(id);
+  textItems.forEach((group) => group.remove());
+  hintItems.forEach((group) => group.remove());
   const anchor = annotationAnchors.get(id);
   if (anchor) {
     anchor.remove();
     annotationAnchors.delete(id);
   }
   annotations.delete(id);
-  activeAnnotationId = null;
+  if (activeAnnotationId === id) {
+    activeAnnotationId = null;
+  }
   ensureAnnotationMode();
-  saveAnnotationsForPdf();
+  if (persist) {
+    saveAnnotationsForPdf();
+  }
   rebuildHeatmapBase();
   renderHeatmap();
+}
+
+function discardActiveAnnotation() {
+  if (!activeAnnotationId) return;
+  removeAnnotationById(activeAnnotationId);
 }
 
 // Collapse active annotation into its anchor, then persist.
 function commitActiveAnnotation() {
   if (!activeAnnotationId) return;
   const id = activeAnnotationId;
+  const { textItems, hintItems } = getAnnotationElements(id);
+  const note = (annotations.get(id)?.note || "").trim();
+  const isEmpty = textItems.length === 0 && hintItems.length === 0 && note.length === 0;
+  if (isEmpty) {
+    alert("Empty annotation discarded. Add a note, text, or hint before committing.");
+    removeAnnotationById(id);
+    return;
+  }
   ensureAnnotationAnchor(id);
   setAnnotationElementsVisible(id, false);
   activeAnnotationId = null;
@@ -1539,6 +1546,7 @@ textLayer.addEventListener("contextmenu", (evt) => {
 });
 hintLayer.addEventListener("pointerdown", (evt) => {
   if (!isAuthenticated) return;
+  if (evt.button !== 0) return;
   if (arrowStart) return;
   const anchor = evt.target.closest(".annotation-anchor");
   if (anchor) {
@@ -1578,6 +1586,12 @@ hintLayer.addEventListener("pointerdown", (evt) => {
 });
 hintLayer.addEventListener("contextmenu", (evt) => {
   if (!isAuthenticated) return;
+  const anchor = evt.target.closest(".annotation-anchor");
+  if (anchor) {
+    evt.preventDefault();
+    openContextMenu(evt.clientX, evt.clientY, { type: "annotation", id: anchor.dataset.annotation });
+    return;
+  }
   const group = evt.target.closest("g");
   if (!group) return;
   evt.preventDefault();
@@ -1709,7 +1723,7 @@ contextMenu.addEventListener("click", (evt) => {
   if (!isAuthenticated) return;
   const action = evt.target.dataset.action;
   if (!action || !contextTarget) return;
-  const { type, group } = contextTarget;
+  const { type, group, id } = contextTarget;
   if (action === "delete") {
     if (type === "text") {
       if (activeGroup === group) activeGroup = null;
@@ -1717,6 +1731,8 @@ contextMenu.addEventListener("click", (evt) => {
     } else if (type === "arrow") {
       if (activeHint === group) activeHint = null;
       group.remove();
+    } else if (type === "annotation") {
+      removeAnnotationById(id);
     }
   }
   if (action === "edit") {
@@ -1737,6 +1753,13 @@ contextMenu.addEventListener("click", (evt) => {
       }
       setActiveTab("hints");
       setActiveHint(group);
+    } else if (type === "annotation") {
+      if (id) {
+        activeAnnotationId = id;
+        ensureAnnotationMode();
+        setAnnotationElementsVisible(id, true);
+        setActiveTab("notes");
+      }
     }
   }
   closeContextMenu();
