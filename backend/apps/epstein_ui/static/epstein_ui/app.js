@@ -397,6 +397,14 @@ function ensureAnnotationAnchor(id) {
   anchor.setAttribute("cx", data.x);
   anchor.setAttribute("cy", data.y);
   updateAnchorSize(anchor);
+  anchor.addEventListener("mouseenter", () => {
+    const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
+    if (card) card.classList.add("hovered");
+  });
+  anchor.addEventListener("mouseleave", () => {
+    const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
+    if (card) card.classList.remove("hovered");
+  });
   return anchor;
 }
 

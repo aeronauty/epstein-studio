@@ -303,6 +303,11 @@ body {
   border-color: #3a4348;
 }
 
+.annotation-note.hovered {
+  background: #14181a;
+  border-color: #3a4348;
+}
+
 .annotation-note-meta {
   font-size: 12px;
   color: var(--muted);
