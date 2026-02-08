@@ -376,6 +376,19 @@ function setAnnotationElementsVisible(id, visible) {
   });
 }
 
+function showAnnotationPreview(id) {
+  setAnnotationElementsVisible(id, true);
+  const groups = Array.from(textLayer.querySelectorAll(".text-group")).filter(
+    (group) => group.dataset.annotation === id
+  );
+  groups.forEach((group) => {
+    group.classList.remove("active");
+    const { box, handle } = getGroupElements(group);
+    if (box) box.style.display = "none";
+    if (handle) handle.style.display = "none";
+  });
+}
+
 // Create or update the annotation anchor dot.
 function ensureAnnotationAnchor(id) {
   const data = annotations.get(id);
@@ -394,12 +407,19 @@ function ensureAnnotationAnchor(id) {
   } else {
     anchor.classList.remove("annotation-anchor-other");
   }
+  hintLayer.appendChild(anchor);
   anchor.setAttribute("cx", data.x);
   anchor.setAttribute("cy", data.y);
   updateAnchorSize(anchor);
   anchor.addEventListener("mouseenter", () => {
     const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
     if (card) card.classList.add("hovered");
+    hintLayer.appendChild(anchor);
+    anchor.dataset.hovered = "1";
+    updateAnchorSize(anchor);
+    if (!activeAnnotationId && !activeAnnotationViewOnly) {
+      showAnnotationPreview(id);
+    }
     if (annotationNotes) {
       let header = annotationNotes.querySelector(".annotation-selected-title");
       if (!header) {
@@ -419,6 +439,11 @@ function ensureAnnotationAnchor(id) {
   anchor.addEventListener("mouseleave", () => {
     const card = annotationNotes?.querySelector(`.annotation-note[data-annotation="${id}"]`);
     if (card) card.classList.remove("hovered");
+    delete anchor.dataset.hovered;
+    updateAnchorSize(anchor);
+    if (!activeAnnotationId && !activeAnnotationViewOnly) {
+      setAnnotationElementsVisible(id, false);
+    }
     const header = annotationNotes?.querySelector(".annotation-selected-title");
     if (header) header.remove();
     renderNotesList();
@@ -431,7 +456,8 @@ function updateAnchorSize(anchor) {
   const base = 6;
   const scaled = base / Math.max(0.0001, view.scale);
   const clamped = Math.max(2, Math.min(10, scaled));
-  anchor.setAttribute("r", clamped.toFixed(3));
+  const hovered = anchor.dataset.hovered === "1";
+  anchor.setAttribute("r", (clamped * (hovered ? 1.5 : 1)).toFixed(3));
   anchor.setAttribute("vector-effect", "non-scaling-stroke");
   const stroke = 2 / Math.max(0.0001, view.scale);
   anchor.setAttribute("stroke-width", stroke.toFixed(3));
