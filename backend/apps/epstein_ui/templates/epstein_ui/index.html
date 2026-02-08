@@ -60,6 +60,20 @@
               <div id="annotationViewHash" class="annotation-view-hash hidden"></div>
               <div id="annotationViewNote" class="annotation-view-note hidden"></div>
               <button id="annotationViewBack" class="btn btn-outline hidden" type="button">Back</button>
+              <div id="discussionPanel" class="discussion-panel hidden">
+                <div class="discussion-body">
+                  <div class="discussion-title">Discussion</div>
+                  <div id="discussionList" class="discussion-list"></div>
+                  <div id="discussionForm" class="discussion-form">
+                    <textarea id="discussionInput" rows="3" placeholder="Add a comment..."></textarea>
+                    <button id="discussionSubmit" class="btn btn-secondary" type="button">Comment</button>
+                  </div>
+                  <div id="discussionLoginHint" class="discussion-hint hidden">Login to comment or vote.</div>
+                </div>
+                <div class="discussion-actions">
+                  <button id="discussionEditBtn" class="btn hidden" type="button">Edit Annotation</button>
+                </div>
+              </div>
               <label class="field">
                 <div class="hint">Explain your annotation (optional).</div>
                 <textarea id="notesInput" rows="8" placeholder="&quot;This Redaction is interesting, because...&quot;"></textarea>
