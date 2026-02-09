@@ -84,6 +84,10 @@ def _get_pdf_pages(pdf_path: Path) -> int:
     return 1
 
 
+def _cache_disabled() -> bool:
+    return os.environ.get("DISABLE_PDF_CACHE", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _render_pdf_pages(pdf_path: Path) -> list[Path]:
     """Render PDF pages into cached PNGs under MEDIA_ROOT."""
     media_dir = Path(settings.MEDIA_ROOT)
@@ -93,9 +97,17 @@ def _render_pdf_pages(pdf_path: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_base = out_dir / "page"
 
-    existing = sorted(out_dir.glob("page-*.png"))
-    if existing:
-        return existing
+    if _cache_disabled():
+        for cached in media_dir.glob("pdf_*"):
+            if cached == out_dir:
+                continue
+            shutil.rmtree(cached, ignore_errors=True)
+        for png in out_dir.glob("page-*.png"):
+            png.unlink()
+    else:
+        existing = sorted(out_dir.glob("page-*.png"))
+        if existing:
+            return existing
 
     cmd = [
         "pdftoppm",
