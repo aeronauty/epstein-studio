@@ -9,6 +9,7 @@ dependencies = [
   "pillow",
   "psycopg[binary]>=3.2.13",
   "pytesseract",
+  "python-dotenv>=1.2.1",
   "tqdm",
 ]
 
