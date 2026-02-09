@@ -138,6 +138,15 @@ body {
   padding: 0;
 }
 
+.mobile-block-message {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+  margin: 0;
+  word-break: break-word;
+}
+
 .annotation-view-actions {
   margin-top: 10px;
   display: flex;
