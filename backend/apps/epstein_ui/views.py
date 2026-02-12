@@ -29,6 +29,7 @@ from .models import (
     PdfCommentReply,
     PdfCommentReplyVote,
     PdfCommentVote,
+    Notification,
 )
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[3] / "data"))
@@ -815,6 +816,14 @@ def pdf_comment_replies(request):
             except PdfCommentReply.DoesNotExist:
                 return JsonResponse({"error": "Invalid parent"}, status=400)
         reply = PdfCommentReply.objects.create(comment=comment, user=request.user, parent=parent, body=body)
+        target_user_id = comment.user_id
+        if target_user_id and target_user_id != request.user.id:
+            Notification.objects.create(
+                user_id=target_user_id,
+                notif_type=Notification.TYPE_PDF_COMMENT_REPLY,
+                pdf_comment=comment,
+                pdf_comment_reply=reply,
+            )
         return JsonResponse({"reply": _pdf_reply_to_dict(reply, request=request)})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -884,6 +893,83 @@ def pdf_reply_votes(request):
     return JsonResponse({"upvotes": upvotes, "downvotes": downvotes, "user_vote": user_vote})
 
 
+def notifications_summary(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"count": 0})
+    count = Notification.objects.filter(user=request.user, is_read=False).count()
+    return JsonResponse({"count": count})
+
+
+def notifications_view(request):
+    if not request.user.is_authenticated:
+        return redirect("login")
+    notifications = (
+        Notification.objects.filter(user=request.user)
+        .select_related("annotation", "annotation_comment", "pdf_comment", "pdf_comment_reply")
+        .order_by("-created_at")
+    )
+    items = []
+    for notif in notifications:
+        body = ""
+        reply_body = ""
+        actor = "Someone"
+        if notif.notif_type == Notification.TYPE_ANNOTATION_REPLY:
+            if notif.annotation_comment and notif.annotation_comment.user_id:
+                actor = notif.annotation_comment.user.username
+            if notif.annotation and (notif.annotation.note or "").strip():
+                body = notif.annotation.note.strip()
+            elif notif.annotation_comment:
+                body = notif.annotation_comment.body
+            if notif.annotation_comment:
+                reply_body = notif.annotation_comment.body
+        elif notif.notif_type == Notification.TYPE_PDF_COMMENT_REPLY:
+            if notif.pdf_comment_reply and notif.pdf_comment_reply.user_id:
+                actor = notif.pdf_comment_reply.user.username
+            if notif.pdf_comment:
+                body = notif.pdf_comment.body
+            if notif.pdf_comment_reply:
+                reply_body = notif.pdf_comment_reply.body
+        target_url = "#"
+        if notif.notif_type == Notification.TYPE_ANNOTATION_REPLY and notif.annotation:
+            target_url = f"/{notif.annotation.pdf_key.replace('.pdf', '')}/{notif.annotation.hash}"
+            if notif.annotation_comment:
+                target_url = f"{target_url}?reply={notif.annotation_comment.id}"
+        elif notif.notif_type == Notification.TYPE_PDF_COMMENT_REPLY and notif.pdf_comment:
+            target_url = f"/{notif.pdf_comment.pdf.filename.replace('.pdf', '')}/{notif.pdf_comment.hash}"
+            if notif.pdf_comment_reply:
+                target_url = f"{target_url}?reply={notif.pdf_comment_reply.id}"
+        items.append(
+            {
+                "id": notif.id,
+                "type": notif.notif_type,
+                "created_at": notif.created_at,
+                "is_read": notif.is_read,
+                "body": body,
+                "reply_body": reply_body,
+                "actor": actor,
+                "target_url": target_url,
+            }
+        )
+    return render(request, "epstein_ui/notifications.html", {"notifications": items})
+
+
+@csrf_exempt
+def notifications_mark_read(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Login required"}, status=401)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    notif_id = payload.get("id")
+    if not notif_id:
+        return JsonResponse({"error": "Missing id"}, status=400)
+    Notification.objects.filter(id=notif_id, user=request.user).update(is_read=True)
+    return JsonResponse({"ok": True})
+
+
 @csrf_exempt
 def annotation_comments(request):
     if request.method == "GET":
@@ -922,6 +1008,14 @@ def annotation_comments(request):
             except AnnotationComment.DoesNotExist:
                 return JsonResponse({"error": "Invalid parent"}, status=400)
         comment = AnnotationComment.objects.create(annotation=annotation, user=request.user, parent=parent, body=body)
+        target_user_id = annotation.user_id
+        if target_user_id and target_user_id != request.user.id:
+            Notification.objects.create(
+                user_id=target_user_id,
+                notif_type=Notification.TYPE_ANNOTATION_REPLY,
+                annotation=annotation,
+                annotation_comment=comment,
+            )
         return JsonResponse({"comment": _comment_to_dict(comment, request=request)})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)

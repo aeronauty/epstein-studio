@@ -131,3 +131,24 @@ class PdfCommentVote(models.Model):
 
     class Meta:
         unique_together = ("comment", "user")
+
+
+class Notification(models.Model):
+    """User notification for replies on annotations or PDF comments."""
+    TYPE_ANNOTATION_REPLY = "annotation_reply"
+    TYPE_PDF_COMMENT_REPLY = "pdf_comment_reply"
+    TYPE_CHOICES = [
+        (TYPE_ANNOTATION_REPLY, "Annotation Reply"),
+        (TYPE_PDF_COMMENT_REPLY, "PDF Comment Reply"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
+    notif_type = models.CharField(max_length=64, choices=TYPE_CHOICES)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Optional references to the origin of the notification
+    annotation = models.ForeignKey(Annotation, null=True, blank=True, on_delete=models.CASCADE)
+    annotation_comment = models.ForeignKey(AnnotationComment, null=True, blank=True, on_delete=models.CASCADE)
+    pdf_comment = models.ForeignKey(PdfComment, null=True, blank=True, on_delete=models.CASCADE)
+    pdf_comment_reply = models.ForeignKey(PdfCommentReply, null=True, blank=True, on_delete=models.CASCADE)

@@ -72,6 +72,8 @@ const discussionSubmit = document.getElementById("discussionSubmit");
 const discussionLoginHint = document.getElementById("discussionLoginHint");
 const discussionEditBtn = document.getElementById("discussionEditBtn");
 const isAuthenticated = document.body.dataset.auth === "1";
+const initialReplyId = new URLSearchParams(window.location.search).get("reply");
+const notificationDots = document.querySelectorAll(".notif-dot");
 let initialTargetHash = document.body.dataset.targetHash || "";
 
 // --- Shared state (viewport, active elements, annotations) ---
@@ -384,6 +386,26 @@ function updatePdfCommentViewVotes(comment) {
   const disableVotes = !isAuthenticated || (comment?.user === currentUserName);
   annotationViewUp.disabled = disableVotes;
   annotationViewDown.disabled = disableVotes;
+}
+
+function updateNotificationDots(count) {
+  if (!notificationDots) return;
+  notificationDots.forEach((dot) => {
+    if (!dot) return;
+    dot.classList.toggle("hidden", !count);
+  });
+}
+
+async function loadNotificationCount() {
+  if (!isAuthenticated) return;
+  try {
+    const response = await fetch("/notifications-count/");
+    if (!response.ok) return;
+    const data = await response.json();
+    updateNotificationDots(data.count || 0);
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 function updateAnnotationCardVote(ann) {
@@ -1134,6 +1156,9 @@ function renderDiscussion(annotationId, comments) {
   const renderNode = (comment, depth) => {
     const item = document.createElement("div");
     item.className = "comment";
+    if (initialReplyId && String(comment.id) === String(initialReplyId)) {
+      item.classList.add("reply-highlight");
+    }
     const currentUserName = document.body.dataset.user || "";
     if (comment.user === currentUserName) {
       item.classList.add("comment-own");
@@ -1304,6 +1329,9 @@ function renderPdfCommentDiscussion(commentId, replies) {
   const renderNode = (comment, depth) => {
     const item = document.createElement("div");
     item.className = "comment";
+    if (initialReplyId && String(comment.id) === String(initialReplyId)) {
+      item.classList.add("reply-highlight");
+    }
     const currentUserName = document.body.dataset.user || "";
     if (comment.user === currentUserName) {
       item.classList.add("comment-own");
@@ -3747,6 +3775,7 @@ if (annotationSortSelect) {
 
 setActiveTab("notes");
 setViewportTransform();
+loadNotificationCount();
 if (window.DEBUG_MODE) {
   searchInput.value = DEBUG_PDF_NAME;
   searchPdf();

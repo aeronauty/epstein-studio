@@ -23,6 +23,9 @@ urlpatterns = [
     path("pdf-reply-votes/", views.pdf_reply_votes, name="pdf_reply_votes"),
     path("pdf-reply-delete/", views.pdf_reply_delete, name="pdf_reply_delete"),
     path("pdf-votes/", views.pdf_votes, name="pdf_votes"),
+    path("notifications-count/", views.notifications_summary, name="notifications_summary"),
+    path("notifications/", views.notifications_view, name="notifications_view"),
+    path("notifications-read/", views.notifications_mark_read, name="notifications_read"),
     path("<slug:pdf_slug>/<uuid:target_hash>/", views.index, name="index_pdf_comment"),
     re_path(r"^(?P<pdf_slug>[A-Za-z0-9_-]+)$", views.index, name="index_pdf"),
 ]
