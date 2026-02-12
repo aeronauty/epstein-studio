@@ -14,17 +14,11 @@ class Command(BaseCommand):
         self.stdout.write(f"Indexed {len(pdfs)} PDFs.")
 
         self.stdout.write("Refreshing annotation counts...")
-        ann_rows = (
-            Annotation.objects.values("pdf_key")
-            .annotate(total=Count("id"))
-        )
+        ann_rows = Annotation.objects.values("pdf_key").annotate(total=Count("id"))
         ann_map = {row["pdf_key"]: row["total"] for row in ann_rows}
 
         self.stdout.write("Refreshing vote scores...")
-        vote_rows = (
-            PdfVote.objects.values("pdf_id")
-            .annotate(score=Sum("value"))
-        )
+        vote_rows = PdfVote.objects.values("pdf_id").annotate(score=Sum("value"))
         vote_map = {row["pdf_id"]: row["score"] or 0 for row in vote_rows}
 
         for doc in PdfDocument.objects.all():

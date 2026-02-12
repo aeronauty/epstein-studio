@@ -58,6 +58,18 @@ def _sync_pdf_index() -> list[PdfDocument]:
 
     return list(PdfDocument.objects.filter(path__in=seen_paths))
 
+
+def _sync_pdf_index_on_request() -> None:
+    """Optional indexing on request; disabled by default for performance."""
+    if os.environ.get("PDF_INDEX_SYNC_ON_REQUEST", "").strip().lower() in {"1", "true", "yes"}:
+        _sync_pdf_index()
+
+
+def _sync_pdf_index_on_request() -> None:
+    """Optional indexing on request; disabled by default for performance."""
+    if os.environ.get("PDF_INDEX_SYNC_ON_REQUEST", "").strip().lower() in {"1", "true", "yes"}:
+        _sync_pdf_index()
+
 def _get_pdf_pages(pdf_path: Path) -> int:
     """Best-effort page count using pdfinfo (falls back to 1)."""
     pdfinfo = shutil.which("pdfinfo")
@@ -154,7 +166,11 @@ def browse(request):
 
 def random_pdf(request):
     """Pick a random PDF and return rendered page metadata."""
-    pdfs = _sync_pdf_index()
+    try:
+        _sync_pdf_index_on_request()
+    except (OperationalError, ProgrammingError):
+        pass
+    pdfs = list(PdfDocument.objects.all())
     if not pdfs:
         pdf_paths = _list_pdfs_on_disk()
         if not pdf_paths:
@@ -193,7 +209,7 @@ def search_pdf(request):
 
     pdf_path = None
     try:
-        _sync_pdf_index()
+        _sync_pdf_index_on_request()
         match = PdfDocument.objects.filter(filename__icontains=query).first()
         if match:
             pdf_path = Path(match.path)
@@ -233,7 +249,7 @@ def search_suggestions(request):
     query = (request.GET.get("q") or "").strip()
     suggestions = []
     try:
-        _sync_pdf_index()
+        _sync_pdf_index_on_request()
         qs = PdfDocument.objects.all()
         if query:
             qs = qs.filter(filename__icontains=query)
@@ -295,7 +311,7 @@ def pdf_votes(request):
         if not pdf_name:
             return JsonResponse({"error": "Missing pdf"}, status=400)
         try:
-            _sync_pdf_index()
+            _sync_pdf_index_on_request()
         except (OperationalError, ProgrammingError):
             pass
         pdf_doc = PdfDocument.objects.filter(filename=pdf_name).first()
@@ -324,7 +340,7 @@ def pdf_votes(request):
     if not pdf_name or value not in (-1, 1):
         return JsonResponse({"error": "Invalid payload"}, status=400)
     try:
-        _sync_pdf_index()
+        _sync_pdf_index_on_request()
     except (OperationalError, ProgrammingError):
         pass
     pdf_doc = PdfDocument.objects.filter(filename=pdf_name).first()
