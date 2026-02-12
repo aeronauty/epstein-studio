@@ -34,6 +34,7 @@ const pdfCommentSubmit = document.getElementById("pdfCommentSubmit");
 const pdfCommentLoginHint = document.getElementById("pdfCommentLoginHint");
 const annotationControls = document.getElementById("annotationControls");
 const annotationNotes = document.getElementById("annotationNotes");
+const annotationNotesTitle = document.getElementById("annotationNotesTitle");
 const annotationStatus = document.getElementById("annotationStatus");
 const annotationSort = document.getElementById("annotationSort");
 const annotationSortSelect = document.getElementById("annotationSortSelect");
@@ -732,26 +733,47 @@ function renderNotesList() {
     annotationStatus.textContent = hasAnnotations || hasPdfComments ? "" : "No Annotations yet";
     annotationStatus.classList.toggle("hidden", hasAnnotations || hasPdfComments);
   }
+  if (annotationNotesTitle) {
+    annotationNotesTitle.classList.toggle("hidden", !(items.length || hasPdfComments));
+  }
   if (!items.length && !hasPdfComments) return;
+  if (annotationSort) {
+    annotationSort.classList.add("hidden");
+  }
 
-  if (hasPdfComments) {
-    const header = document.createElement("div");
-    header.className = "annotation-section-title";
-    header.textContent = "Discussion";
-    annotationNotes.appendChild(header);
-    pdfComments.forEach((comment) => {
+  const combined = [];
+  items.forEach((ann) => {
+    combined.push({
+      type: "annotation",
+      createdAt: ann.createdAt,
+      payload: ann,
+    });
+  });
+  pdfComments.forEach((comment) => {
+    combined.push({
+      type: "comment",
+      createdAt: comment.created_at,
+      payload: comment,
+    });
+  });
+
+  combined.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+  combined.forEach((entry) => {
+    if (entry.type === "comment") {
+      const comment = entry.payload;
       const wrapper = document.createElement("div");
       wrapper.className = "annotation-note pdf-comment-card";
-    const meta = document.createElement("div");
-    meta.className = "annotation-note-meta";
-    const stamp = formatTimestamp(comment.created_at, { dateOnly: true });
-    const currentUserName = document.body.dataset.user || "";
-    const isMine = currentUserName && comment.user === currentUserName;
-    const author = isMine ? "By you" : comment.user ? `By ${comment.user}` : "By Unknown";
-    meta.textContent = stamp ? `${author} • ${stamp}` : author;
-    if (isMine) {
-      meta.classList.add("by-you");
-    }
+      const meta = document.createElement("div");
+      meta.className = "annotation-note-meta";
+      const stamp = formatTimestamp(comment.created_at, { dateOnly: true });
+      const currentUserName = document.body.dataset.user || "";
+      const isMine = currentUserName && comment.user === currentUserName;
+      const author = isMine ? "By you" : comment.user ? `By ${comment.user}` : "By Unknown";
+      meta.textContent = stamp ? `${author} • ${stamp}` : author;
+      if (isMine) {
+        meta.classList.add("by-you");
+      }
 
       const text = document.createElement("div");
       text.className = "annotation-note-text";
@@ -765,45 +787,10 @@ function renderNotesList() {
       wrapper.appendChild(meta);
       wrapper.appendChild(text);
       annotationNotes.appendChild(wrapper);
-    });
-  }
-
-  const mine = items.filter((ann) => ann.isOwner);
-  const others = items.filter((ann) => !ann.isOwner);
-  if (annotationSort) {
-    annotationSort.classList.add("hidden");
-  }
-
-  mine.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  const sortMode = annotationSortSelect?.value || "upvotes";
-  if (sortMode === "newest") {
-    others.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-  } else if (sortMode === "oldest") {
-    others.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
-  } else {
-    others.sort((a, b) => (b.upvotes || 0) - (b.downvotes || 0) - ((a.upvotes || 0) - (a.downvotes || 0)));
-  }
-
-  const renderSection = (title, list, showHeader, showSort = false) => {
-    if (!list.length) return;
-    if (showHeader) {
-      const header = document.createElement("div");
-      header.className = "annotation-section-title";
-      header.textContent = title;
-      if (showSort && annotationSort) {
-        const row = document.createElement("div");
-        row.className = "annotation-section-row";
-        row.appendChild(header);
-        row.appendChild(annotationSort);
-        annotationNotes.appendChild(row);
-      } else {
-        annotationNotes.appendChild(header);
-      }
+      return;
     }
-    if (showSort && annotationSort) {
-      annotationSort.classList.remove("hidden");
-    }
-    list.forEach((ann) => {
+
+    const ann = entry.payload;
     const wrapper = document.createElement("div");
     wrapper.className = "annotation-note";
     wrapper.dataset.annotation = ann.id;
@@ -942,11 +929,7 @@ function renderNotesList() {
       }
       activateAnnotation(ann.id, { viewOnly: true });
     });
-    });
-  };
-
-  renderSection("Your annotations", mine, mine.length > 0, false);
-  renderSection("Other annotations", others, mine.length > 0, true);
+  });
 }
 
 function renderDiscussion(annotationId, comments) {
