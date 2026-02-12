@@ -13,9 +13,9 @@
         <div class="brand">Epstein Studio</div>
       </header>
       <main class="layout" style="grid-template-columns: 1fr;">
-        <section class="panel" style="max-width: 420px; margin: 8vh auto 0;">
+        <section style="max-width: 420px; margin: 8vh auto 0;">
           <div class="tab-panel active" style="display: flex;">
-            <div class="hint">Sign in with your username and password.</div>
+            <div class="hint">Sign in with your ID and password.</div>
             {% if form.errors %}
               <div class="hint" style="color: #ff6b6b;">Invalid username or password.</div>
             {% endif %}
@@ -23,7 +23,7 @@
               {% csrf_token %}
               {% if next %}<input type="hidden" name="next" value="{{ next }}" />{% endif %}
               <label class="field">
-                <span>Username</span>
+                <span>ID</span>
                 <input type="text" name="username" autocomplete="username" required autofocus />
               </label>
               <label class="field">
@@ -32,7 +32,11 @@
               </label>
               <button type="submit" class="btn">Log In</button>
             </form>
-            <div class="hint">Need an account? <a href="/register/">Create one</a></div>
+            <div class="hint">First time? <a href="/register/">Create anonymous ID</a></div>
+            <div class="hint" style="margin-top: 12px;">
+              This site does not store any personal information. The ID is only for editing and managing your annotations and for discussions. We do not ask for personal information and we do not log anything.
+              <a href="https://github.com/artischocki/epstein-studio" target="_blank" rel="noreferrer">Repository</a>
+            </div>
           </div>
         </section>
       </main>

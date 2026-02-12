@@ -370,15 +370,39 @@ def pdf_votes(request):
 
 def register(request):
     """Simple username/password registration with auto-login."""
+    def _generate_id():
+        alphabet = "abcdefghijklmnopqrstuvwxyz"
+        return "".join(random.choice(alphabet) for _ in range(5))
+
     if request.method == "POST":
-        form = UserCreationForm(request.POST)
+        data = request.POST.copy()
+        if not data.get("username"):
+            data["username"] = data.get("suggested_id", "").strip()
+        form = UserCreationForm(data)
         if form.is_valid():
             user = form.save()
             login(request, user)
             return redirect("index")
     else:
         form = UserCreationForm()
-    return render(request, "epstein_ui/register.html", {"form": form})
+    suggested_id = None
+    for _ in range(10):
+        candidate = _generate_id()
+        if not User.objects.filter(username__iexact=candidate).exists():
+            suggested_id = candidate
+            break
+    if suggested_id is None:
+        suggested_id = _generate_id()
+    current_username = ""
+    try:
+        current_username = form.data.get("username", "")
+    except Exception:
+        current_username = ""
+    return render(
+        request,
+        "epstein_ui/register.html",
+        {"form": form, "suggested_id": suggested_id, "current_username": current_username},
+    )
 
 
 def logout_view(request):
