@@ -2973,6 +2973,9 @@ window.addEventListener("pointerdown", (evt) => {
   if (evt.target.closest(".text-editor")) return;
   if (evt.target.closest(".panel")) return;
   if (activeAnnotationViewOnly) {
+    if (evt.target.closest("#overlay") && (evt.ctrlKey || evt.button === 1)) {
+      return;
+    }
     clearActiveAnnotation();
     return;
   }
