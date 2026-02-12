@@ -101,3 +101,22 @@ class PdfComment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PdfCommentReply(models.Model):
+    """Reply in a PDF comment discussion."""
+    comment = models.ForeignKey(PdfComment, on_delete=models.CASCADE, related_name="replies")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    parent = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="children")
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PdfCommentReplyVote(models.Model):
+    """Single user vote (+1 or -1) for a PDF comment reply."""
+    reply = models.ForeignKey(PdfCommentReply, on_delete=models.CASCADE, related_name="votes")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    value = models.SmallIntegerField()
+
+    class Meta:
+        unique_together = ("reply", "user")

@@ -18,6 +18,9 @@ urlpatterns = [
     path("comment-votes/", views.comment_votes, name="comment_votes"),
     path("comment-delete/", views.delete_comment, name="comment_delete"),
     path("pdf-comments/", views.pdf_comments, name="pdf_comments"),
+    path("pdf-comment-replies/", views.pdf_comment_replies, name="pdf_comment_replies"),
+    path("pdf-reply-votes/", views.pdf_reply_votes, name="pdf_reply_votes"),
+    path("pdf-reply-delete/", views.pdf_reply_delete, name="pdf_reply_delete"),
     path("pdf-votes/", views.pdf_votes, name="pdf_votes"),
     re_path(r"^(?P<pdf_slug>[A-Za-z0-9_-]+)$", views.index, name="index_pdf"),
 ]

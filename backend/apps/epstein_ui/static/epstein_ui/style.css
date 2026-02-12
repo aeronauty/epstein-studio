@@ -163,6 +163,10 @@ body {
   gap: 6px;
 }
 
+.annotation-view-actions.pdf-discussion .annotation-view-votes {
+  display: none;
+}
+
 #annotationViewBack {
   align-self: flex-end;
   width: auto;

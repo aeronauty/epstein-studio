@@ -16,7 +16,19 @@ from django.contrib.auth.models import User
 from django.views.decorators.csrf import csrf_exempt
 from django.db.utils import OperationalError, ProgrammingError
 
-from .models import Annotation, TextItem, ArrowItem, PdfDocument, AnnotationVote, AnnotationComment, CommentVote, PdfVote, PdfComment
+from .models import (
+    Annotation,
+    TextItem,
+    ArrowItem,
+    PdfDocument,
+    AnnotationVote,
+    AnnotationComment,
+    CommentVote,
+    PdfVote,
+    PdfComment,
+    PdfCommentReply,
+    PdfCommentReplyVote,
+)
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[3] / "data"))
 
@@ -662,6 +674,29 @@ def _pdf_comment_to_dict(comment):
     }
 
 
+def _pdf_reply_to_dict(reply, request=None):
+    votes = list(reply.votes.all())
+    upvotes = sum(1 for v in votes if v.value == 1)
+    downvotes = sum(1 for v in votes if v.value == -1)
+    user_vote = 0
+    if request is not None and request.user.is_authenticated:
+        for vote in votes:
+            if vote.user_id == request.user.id:
+                user_vote = vote.value
+                break
+    return {
+        "id": reply.id,
+        "comment_id": reply.comment_id,
+        "parent_id": reply.parent_id,
+        "user": reply.user.username,
+        "body": reply.body,
+        "created_at": reply.created_at.isoformat() if reply.created_at else None,
+        "upvotes": upvotes,
+        "downvotes": downvotes,
+        "user_vote": user_vote,
+    }
+
+
 @csrf_exempt
 def pdf_comments(request):
     if request.method == "POST":
@@ -680,6 +715,113 @@ def pdf_comments(request):
         return JsonResponse({"comment": _pdf_comment_to_dict(comment)})
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def pdf_comment_replies(request):
+    if request.method == "GET":
+        comment_id = request.GET.get("comment_id")
+        if not comment_id:
+            return JsonResponse({"error": "Missing comment_id"}, status=400)
+        replies = (
+            PdfCommentReply.objects.filter(comment_id=comment_id)
+            .select_related("user")
+            .prefetch_related("votes")
+            .order_by("created_at")
+        )
+        payload = [_pdf_reply_to_dict(r, request=request) for r in replies]
+        return JsonResponse({"replies": payload})
+
+    if request.method == "POST":
+        if not request.user.is_authenticated:
+            return JsonResponse({"error": "Login required"}, status=401)
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        comment_id = payload.get("comment_id")
+        body = (payload.get("body") or "").strip()
+        parent_id = payload.get("parent_id")
+        if not comment_id or not body:
+            return JsonResponse({"error": "Missing fields"}, status=400)
+        try:
+            comment = PdfComment.objects.get(id=comment_id)
+        except PdfComment.DoesNotExist:
+            return JsonResponse({"error": "Not found"}, status=404)
+        parent = None
+        if parent_id:
+            try:
+                parent = PdfCommentReply.objects.get(id=parent_id, comment=comment)
+            except PdfCommentReply.DoesNotExist:
+                return JsonResponse({"error": "Invalid parent"}, status=400)
+        reply = PdfCommentReply.objects.create(comment=comment, user=request.user, parent=parent, body=body)
+        return JsonResponse({"reply": _pdf_reply_to_dict(reply, request=request)})
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+@csrf_exempt
+def pdf_reply_delete(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Login required"}, status=401)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    reply_id = payload.get("reply_id")
+    if not reply_id:
+        return JsonResponse({"error": "Missing reply_id"}, status=400)
+    try:
+        reply = PdfCommentReply.objects.get(id=reply_id, user=request.user)
+    except PdfCommentReply.DoesNotExist:
+        return JsonResponse({"error": "Not found"}, status=404)
+    reply.delete()
+    return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+def pdf_reply_votes(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Login required"}, status=401)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    reply_id = payload.get("reply_id")
+    value = payload.get("value")
+    if reply_id is None or value not in (-1, 1):
+        return JsonResponse({"error": "Invalid payload"}, status=400)
+    try:
+        reply = PdfCommentReply.objects.get(id=reply_id)
+    except PdfCommentReply.DoesNotExist:
+        return JsonResponse({"error": "Not found"}, status=404)
+    if reply.user_id == request.user.id:
+        return JsonResponse({"error": "Cannot vote own reply"}, status=403)
+
+    vote, created = PdfCommentReplyVote.objects.get_or_create(
+        reply=reply,
+        user=request.user,
+        defaults={"value": value},
+    )
+    if not created:
+        if vote.value == value:
+            vote.delete()
+        else:
+            vote.value = value
+            vote.save(update_fields=["value"])
+
+    upvotes = PdfCommentReplyVote.objects.filter(reply=reply, value=1).count()
+    downvotes = PdfCommentReplyVote.objects.filter(reply=reply, value=-1).count()
+    user_vote = 0
+    try:
+        user_vote = PdfCommentReplyVote.objects.get(reply=reply, user=request.user).value
+    except PdfCommentReplyVote.DoesNotExist:
+        user_vote = 0
+    return JsonResponse({"upvotes": upvotes, "downvotes": downvotes, "user_vote": user_vote})
 
 
 @csrf_exempt

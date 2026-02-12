@@ -122,6 +122,9 @@ let hoverPreviewState = null;
 let hoverPreviewId = null;
 let currentPdfVotes = { upvotes: 0, downvotes: 0, user_vote: 0 };
 let pdfComments = [];
+let activePdfDiscussion = false;
+let activePdfCommentId = null;
+let pdfCommentReplyCache = new Map();
 
 function formatTimestamp(value, { dateOnly = false } = {}) {
   if (!value) return "";
@@ -231,26 +234,56 @@ function stopAnnotationCreate() {
 }
 
 function ensureAnnotationMode() {
-  if (!activeAnnotationId) {
+  if (!activeAnnotationId && !activePdfDiscussion) {
     hideAnnotationControls();
   } else {
     showAnnotationControls();
-    ensureAnnotationAnchor(activeAnnotationId);
+    if (activeAnnotationId) {
+      ensureAnnotationAnchor(activeAnnotationId);
+    }
   }
   updateAnnotationPanelMode();
   updateAnnotationVisibility();
+  updateTabStates();
 }
 
 function updateAnnotationPanelMode() {
   if (!annotationControls) return;
   const tabsList = Array.from(annotationControls.querySelectorAll(".tab"));
+  if (activePdfDiscussion) {
+    activeAnnotationViewOnly = false;
+    if (annotationTabs) annotationTabs.classList.add("hidden");
+    if (annotationViewTitle) annotationViewTitle.classList.remove("hidden");
+    if (annotationViewHash) annotationViewHash.classList.add("hidden");
+    if (annotationViewNote) annotationViewNote.classList.remove("hidden");
+    if (annotationViewActions) {
+      annotationViewActions.classList.remove("hidden");
+      annotationViewActions.classList.add("pdf-discussion");
+    }
+    if (discussionPanel) discussionPanel.classList.remove("hidden");
+    if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    tabsList.forEach((tab) => {
+      tab.disabled = true;
+    });
+    if (notesInput) {
+      notesInput.readOnly = true;
+      notesInput.closest(".field")?.classList.add("hidden");
+    }
+    commitAnnotationBtn?.classList.add("hidden");
+    discardAnnotationBtn?.classList.add("hidden");
+    updatePdfCommentView();
+    return;
+  }
   if (!activeAnnotationId) {
     activeAnnotationViewOnly = false;
     if (annotationTabs) annotationTabs.classList.remove("hidden");
     if (annotationViewTitle) annotationViewTitle.classList.add("hidden");
     if (annotationViewHash) annotationViewHash.classList.add("hidden");
     if (annotationViewNote) annotationViewNote.classList.add("hidden");
-    if (annotationViewActions) annotationViewActions.classList.add("hidden");
+    if (annotationViewActions) {
+      annotationViewActions.classList.add("hidden");
+      annotationViewActions.classList.remove("pdf-discussion");
+    }
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
     tabsList.forEach((tab) => {
@@ -270,7 +303,10 @@ function updateAnnotationPanelMode() {
     if (annotationViewTitle) annotationViewTitle.classList.remove("hidden");
     if (annotationViewHash) annotationViewHash.classList.remove("hidden");
     if (annotationViewNote) annotationViewNote.classList.remove("hidden");
-    if (annotationViewActions) annotationViewActions.classList.remove("hidden");
+    if (annotationViewActions) {
+      annotationViewActions.classList.remove("hidden");
+      annotationViewActions.classList.remove("pdf-discussion");
+    }
     if (discussionPanel) discussionPanel.classList.remove("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
     if (notesInput) notesInput.closest(".field")?.classList.add("hidden");
@@ -311,7 +347,10 @@ function updateAnnotationPanelMode() {
       annotationViewHash.classList.toggle("hidden", !ann?.hash);
     }
     if (annotationViewNote) annotationViewNote.classList.add("hidden");
-    if (annotationViewActions) annotationViewActions.classList.add("hidden");
+    if (annotationViewActions) {
+      annotationViewActions.classList.add("hidden");
+      annotationViewActions.classList.remove("pdf-discussion");
+    }
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
     if (notesInput) notesInput.classList.remove("hidden");
@@ -390,6 +429,8 @@ async function loadPdfVotes(pdfName) {
 
 function activateAnnotation(id, { viewOnly = false } = {}) {
   if (!id) return;
+  activePdfDiscussion = false;
+  activePdfCommentId = null;
   activeAnnotationId = id;
   activeAnnotationViewOnly = viewOnly;
   const ann = annotations.get(id);
@@ -423,12 +464,14 @@ function activateAnnotation(id, { viewOnly = false } = {}) {
 function clearActiveAnnotation() {
   activeAnnotationId = null;
   activeAnnotationViewOnly = false;
+  activePdfDiscussion = false;
+  activePdfCommentId = null;
   if (discussionList) discussionList.innerHTML = "";
   ensureAnnotationMode();
 }
 
 function updateAnnotationVisibility() {
-  if (activeAnnotationId) {
+  if (activeAnnotationId || activePdfDiscussion) {
     if (heatmapCanvas) {
       heatmapCanvas.style.display = "none";
     }
@@ -441,20 +484,31 @@ function updateAnnotationVisibility() {
     if (annotationSort) {
       annotationSort.classList.add("hidden");
     }
-    annotations.forEach((_, id) => {
-      const isActive = id === activeAnnotationId;
-      setAnnotationElementsVisible(id, isActive);
-      const anchor = annotationAnchors.get(id);
-      if (anchor) {
-        if (isActive) {
-          anchor.style.display = "";
-          anchor.style.opacity = "0.35";
-        } else {
+    if (activeAnnotationId) {
+      annotations.forEach((_, id) => {
+        const isActive = id === activeAnnotationId;
+        setAnnotationElementsVisible(id, isActive);
+        const anchor = annotationAnchors.get(id);
+        if (anchor) {
+          if (isActive) {
+            anchor.style.display = "";
+            anchor.style.opacity = "0.35";
+          } else {
+            anchor.style.display = "none";
+            anchor.style.opacity = "";
+          }
+        }
+      });
+    } else {
+      annotations.forEach((_, id) => {
+        setAnnotationElementsVisible(id, false);
+        const anchor = annotationAnchors.get(id);
+        if (anchor) {
           anchor.style.display = "none";
           anchor.style.opacity = "";
         }
-      }
-    });
+      });
+    }
     return;
   }
 
@@ -784,13 +838,22 @@ function renderNotesList() {
       const comment = entry.payload;
       const wrapper = document.createElement("div");
       wrapper.className = "annotation-note pdf-comment-card";
+      wrapper.addEventListener("click", () => {
+        if (activePdfDiscussion && activePdfCommentId === comment.id) return;
+        activePdfDiscussion = true;
+        activePdfCommentId = comment.id;
+        activeAnnotationId = null;
+        activeAnnotationViewOnly = false;
+        ensureAnnotationMode();
+        loadPdfCommentReplies(comment.id);
+      });
       const meta = document.createElement("div");
       meta.className = "annotation-note-meta";
       const stamp = formatTimestamp(comment.created_at, { dateOnly: true });
       const currentUserName = document.body.dataset.user || "";
       const isMine = currentUserName && comment.user === currentUserName;
       const author = isMine ? "By you" : comment.user ? `By ${comment.user}` : "By Unknown";
-      meta.textContent = stamp ? `${author} • ${stamp}` : author;
+      meta.textContent = isMine ? "By you" : stamp ? `${author} • ${stamp}` : author;
       if (isMine) {
         meta.classList.add("by-you");
       }
@@ -1096,6 +1159,161 @@ function renderDiscussion(annotationId, comments) {
   roots.forEach((comment) => renderNode(comment, 0));
 }
 
+function updatePdfCommentView() {
+  if (!annotationViewTitle || !annotationViewNote) return;
+  const comment = pdfComments.find((c) => c.id === activePdfCommentId);
+  if (!comment) return;
+  const stamp = formatTimestamp(comment.created_at);
+  const author = comment.user ? comment.user : "Unknown";
+  annotationViewTitle.textContent = stamp ? `${author}: ${stamp}` : `${author}:`;
+  annotationViewNote.innerHTML = linkify(comment.body || "");
+  annotationViewNote.classList.remove("empty");
+}
+
+function renderPdfCommentDiscussion(commentId, replies) {
+  if (!discussionList) return;
+  discussionList.innerHTML = "";
+  if (!commentId) return;
+  const byParent = new Map();
+  replies.forEach((c) => {
+    const key = c.parent_id || "root";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(c);
+  });
+  const renderNode = (comment, depth) => {
+    const item = document.createElement("div");
+    item.className = "comment";
+    const currentUserName = document.body.dataset.user || "";
+    if (comment.user === currentUserName) {
+      item.classList.add("comment-own");
+    }
+    if (depth > 0) {
+      item.style.marginLeft = `${Math.min(depth, 6) * 18}px`;
+    }
+    const meta = document.createElement("div");
+    meta.className = "comment-meta";
+    const stamp = formatTimestamp(comment.created_at);
+    const author = comment.user === currentUserName ? "You" : comment.user;
+    meta.textContent = stamp ? `${author} • ${stamp}` : author;
+    const body = document.createElement("div");
+    body.className = "comment-body";
+    body.textContent = comment.body;
+
+    const actions = document.createElement("div");
+    actions.className = "comment-actions";
+    const upBtn = document.createElement("button");
+    upBtn.className = "vote-btn up";
+    upBtn.innerHTML = `<img class="vote-icon" src="/static/epstein_ui/icons/arrow-big-up.svg" alt="" />`;
+    if (comment.user_vote === 1) upBtn.classList.add("active");
+    const commentOwner = comment.user === currentUserName;
+    upBtn.disabled = !isAuthenticated || commentOwner;
+    upBtn.addEventListener("click", async (evt) => {
+      evt.stopPropagation();
+      const result = await sendPdfReplyVote(comment.id, 1);
+      if (!result) return;
+      comment.upvotes = result.upvotes;
+      comment.downvotes = result.downvotes;
+      comment.user_vote = result.user_vote || 0;
+      renderPdfCommentDiscussion(commentId, replies);
+    });
+
+    const downBtn = document.createElement("button");
+    downBtn.className = "vote-btn down";
+    downBtn.innerHTML = `<img class="vote-icon" src="/static/epstein_ui/icons/arrow-big-down.svg" alt="" />`;
+    if (comment.user_vote === -1) downBtn.classList.add("active");
+    downBtn.disabled = !isAuthenticated || commentOwner;
+    downBtn.addEventListener("click", async (evt) => {
+      evt.stopPropagation();
+      const result = await sendPdfReplyVote(comment.id, -1);
+      if (!result) return;
+      comment.upvotes = result.upvotes;
+      comment.downvotes = result.downvotes;
+      comment.user_vote = result.user_vote || 0;
+      renderPdfCommentDiscussion(commentId, replies);
+    });
+
+    const score = document.createElement("span");
+    score.className = "vote-score";
+    score.textContent = (comment.upvotes || 0) - (comment.downvotes || 0);
+
+    const replyBtn = document.createElement("span");
+    replyBtn.className = "comment-reply";
+    replyBtn.textContent = "Reply";
+    replyBtn.addEventListener("click", () => {
+      if (!isAuthenticated) return;
+      const existing = item.querySelector(".comment-reply-form");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+      const form = document.createElement("div");
+      form.className = "comment-reply-form discussion-form";
+      const input = document.createElement("textarea");
+      input.rows = 2;
+      input.placeholder = "Write a reply...";
+      const btn = document.createElement("button");
+      btn.className = "btn btn-secondary";
+      btn.textContent = "Reply";
+      btn.addEventListener("click", async () => {
+        const text = input.value.trim();
+        if (!text) return;
+        const result = await sendPdfCommentReply(commentId, text, comment.id);
+        if (!result) return;
+        replies.push(result);
+        renderPdfCommentDiscussion(commentId, replies);
+      });
+      form.appendChild(input);
+      form.appendChild(btn);
+      item.appendChild(form);
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "comment-delete";
+    deleteBtn.type = "button";
+    deleteBtn.textContent = "Delete";
+    const canDelete = isAuthenticated && currentUserName && comment.user === currentUserName;
+    deleteBtn.classList.toggle("hidden", !canDelete);
+    deleteBtn.disabled = !canDelete;
+    deleteBtn.addEventListener("click", async () => {
+      if (!canDelete) return;
+      showConfirm(async () => {
+        const result = await deletePdfReply(comment.id);
+        if (!result || !result.ok) return;
+        const removeIds = new Set([comment.id]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          replies.forEach((c) => {
+            if (c.parent_id && removeIds.has(c.parent_id) && !removeIds.has(c.id)) {
+              removeIds.add(c.id);
+              changed = true;
+            }
+          });
+        }
+        const next = replies.filter((c) => !removeIds.has(c.id));
+        replies.length = 0;
+        next.forEach((c) => replies.push(c));
+        renderPdfCommentDiscussion(commentId, replies);
+      });
+    });
+
+    actions.appendChild(upBtn);
+    actions.appendChild(downBtn);
+    actions.appendChild(score);
+    actions.appendChild(replyBtn);
+    actions.appendChild(deleteBtn);
+    item.appendChild(meta);
+    item.appendChild(body);
+    item.appendChild(actions);
+    discussionList.appendChild(item);
+
+    const children = byParent.get(comment.id) || [];
+    children.forEach((child) => renderNode(child, depth + 1));
+  };
+  const roots = byParent.get("root") || [];
+  roots.forEach((comment) => renderNode(comment, 0));
+}
+
 async function loadDiscussionForAnnotation(annotationId) {
   if (!discussionPanel) return;
   if (!annotationId) {
@@ -1154,6 +1372,76 @@ async function sendPdfComment(pdfName, body) {
     if (!response.ok) return null;
     const data = await response.json();
     return data.comment || null;
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+async function loadPdfCommentReplies(commentId) {
+  if (!commentId) return;
+  if (discussionPanel) discussionPanel.classList.remove("hidden");
+  if (discussionLoginHint) {
+    discussionLoginHint.classList.toggle("hidden", isAuthenticated);
+  }
+  if (discussionForm) {
+    discussionForm.classList.toggle("hidden", !isAuthenticated);
+  }
+  if (pdfCommentReplyCache.has(commentId)) {
+    renderPdfCommentDiscussion(commentId, pdfCommentReplyCache.get(commentId));
+  }
+  try {
+    const response = await fetch(`/pdf-comment-replies/?comment_id=${commentId}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    const replies = data.replies || [];
+    pdfCommentReplyCache.set(commentId, replies);
+    renderPdfCommentDiscussion(commentId, replies);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function sendPdfCommentReply(commentId, body, parentId = null) {
+  try {
+    const response = await fetch("/pdf-comment-replies/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ comment_id: commentId, body, parent_id: parentId }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.reply || null;
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+async function sendPdfReplyVote(replyId, value) {
+  try {
+    const response = await fetch("/pdf-reply-votes/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reply_id: replyId, value }),
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+async function deletePdfReply(replyId) {
+  try {
+    const response = await fetch("/pdf-reply-delete/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reply_id: replyId }),
+    });
+    if (!response.ok) return null;
+    return await response.json();
   } catch (err) {
     console.error(err);
     return null;
@@ -1572,6 +1860,12 @@ function updateTabStates() {
   const textPanel = document.querySelector('[data-panel="text"]');
   const hintsPanel = document.querySelector('[data-panel="hints"]');
   const notesPanel = document.querySelector('[data-panel="notes"]');
+  if (activePdfDiscussion) {
+    if (textPanel) textPanel.classList.add("disabled");
+    if (hintsPanel) hintsPanel.classList.add("disabled");
+    if (notesPanel) notesPanel.classList.remove("disabled");
+    return;
+  }
   if (!activeAnnotationId) {
     if (textPanel) textPanel.classList.add("disabled");
     if (hintsPanel) hintsPanel.classList.add("disabled");
@@ -2201,7 +2495,10 @@ function clearOverlays() {
   activeHint = null;
   annotations.clear();
   pdfComments = [];
+  pdfCommentReplyCache.clear();
   activeAnnotationId = null;
+  activePdfDiscussion = false;
+  activePdfCommentId = null;
   annotationCounter = 0;
   stopAnnotationCreate();
   ensureAnnotationMode();
@@ -2259,8 +2556,11 @@ function loadStateForPdf(key) {
   const state = pdfState.get(key);
   annotations.clear();
   pdfComments = [];
+  pdfCommentReplyCache.clear();
   commentCache.clear();
   activeAnnotationId = null;
+  activePdfDiscussion = false;
+  activePdfCommentId = null;
   if (!state) {
     ensureAnnotationMode();
     return;
@@ -3187,10 +3487,20 @@ if (confirmOverlay) {
 if (discussionSubmit) {
   discussionSubmit.addEventListener("click", async () => {
     if (!isAuthenticated) return;
-    const ann = annotations.get(activeAnnotationId);
-    if (!ann || !ann.server_id) return;
     const body = discussionInput.value.trim();
     if (!body) return;
+    if (activePdfDiscussion && activePdfCommentId) {
+      const result = await sendPdfCommentReply(activePdfCommentId, body);
+      if (!result) return;
+      const list = pdfCommentReplyCache.get(activePdfCommentId) || [];
+      list.push(result);
+      pdfCommentReplyCache.set(activePdfCommentId, list);
+      discussionInput.value = "";
+      renderPdfCommentDiscussion(activePdfCommentId, list);
+      return;
+    }
+    const ann = annotations.get(activeAnnotationId);
+    if (!ann || !ann.server_id) return;
     const result = await sendComment(ann.server_id, body);
     if (!result) return;
     const list = commentCache.get(ann.server_id) || [];
