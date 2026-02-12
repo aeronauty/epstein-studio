@@ -85,6 +85,20 @@ def _get_pdf_pages(pdf_path: Path) -> int:
 def _cache_disabled() -> bool:
     return os.environ.get("DISABLE_PDF_CACHE", "").strip().lower() in {"1", "true", "yes"}
 
+def _extract_pdf_images(pdf_path: Path, out_dir: Path) -> list[Path]:
+    """Try to extract embedded images from the PDF. Returns list of PNG paths."""
+    out_base = out_dir / "img"
+    cmd = [
+        "pdfimages",
+        "-png",
+        str(pdf_path),
+        str(out_base),
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        return []
+    return sorted(out_dir.glob("img-*.png"))
+
 
 def _render_pdf_pages(pdf_path: Path) -> list[Path]:
     """Render PDF pages into cached PNGs under MEDIA_ROOT."""
@@ -106,6 +120,10 @@ def _render_pdf_pages(pdf_path: Path) -> list[Path]:
         existing = sorted(out_dir.glob("page-*.png"))
         if existing:
             return existing
+
+    extracted = _extract_pdf_images(pdf_path, out_dir)
+    if extracted:
+        return extracted
 
     cmd = [
         "pdftoppm",
