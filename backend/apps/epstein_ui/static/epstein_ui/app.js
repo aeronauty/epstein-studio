@@ -844,6 +844,7 @@ function renderNotesList() {
     if (targetAnnotation) {
       initialTargetHash = "";
       activateAnnotation(targetAnnotation.id, { viewOnly: true });
+      centerOn(targetAnnotation.x, targetAnnotation.y);
       return;
     }
   }
