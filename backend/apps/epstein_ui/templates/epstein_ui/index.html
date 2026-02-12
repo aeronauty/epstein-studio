@@ -67,16 +67,18 @@
             <button id="pdfCommentSubmit" class="btn btn-secondary" type="button">Post Comment</button>
             <div id="pdfCommentLoginHint" class="discussion-hint hidden">Login to comment.</div>
           </div>
-          <div id="annotationNotesTitle" class="annotation-section-title hidden">Comments and Annotations</div>
+          <div class="annotation-section-row">
+            <div id="annotationNotesTitle" class="annotation-section-title hidden">Comments and Annotations</div>
+            <div id="annotationSort" class="annotation-sort hidden">
+              <select id="annotationSortSelect">
+                <option value="date" selected>Date</option>
+                <option value="upvotes">Upvotes</option>
+                <option value="mine">Mine only</option>
+              </select>
+            </div>
+          </div>
           <div id="annotationNotes" class="annotation-notes"></div>
           <div id="annotationStatus" class="annotation-status hidden">Annotations Loading...</div>
-          <div id="annotationSort" class="annotation-sort hidden">
-            <select id="annotationSortSelect">
-              <option value="date" selected>Date</option>
-              <option value="upvotes">Upvotes</option>
-              <option value="mine">Mine only</option>
-            </select>
-          </div>
           <div id="annotationControls" class="annotation-controls hidden">
             <div class="tabs" id="annotationTabs">
               <button class="tab active tab-notes" data-tab="notes">Note</button>
