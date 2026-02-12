@@ -738,7 +738,7 @@ function renderNotesList() {
   }
   if (!items.length && !hasPdfComments) return;
   if (annotationSort) {
-    annotationSort.classList.add("hidden");
+    annotationSort.classList.remove("hidden");
   }
 
   const combined = [];
@@ -757,9 +757,29 @@ function renderNotesList() {
     });
   });
 
-  combined.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const sortMode = annotationSortSelect?.value || "date";
+  const currentUserName = document.body.dataset.user || "";
+  let filtered = combined;
+  if (sortMode === "mine") {
+    filtered = combined.filter((entry) => {
+      if (entry.type === "annotation") return entry.payload.isOwner;
+      if (!currentUserName) return false;
+      return entry.payload.user === currentUserName;
+    });
+  }
 
-  combined.forEach((entry) => {
+  if (sortMode === "upvotes") {
+    filtered.sort((a, b) => {
+      const scoreA = a.type === "annotation" ? (a.payload.upvotes || 0) - (a.payload.downvotes || 0) : 0;
+      const scoreB = b.type === "annotation" ? (b.payload.upvotes || 0) - (b.payload.downvotes || 0) : 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+  } else {
+    filtered.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+
+  filtered.forEach((entry) => {
     if (entry.type === "comment") {
       const comment = entry.payload;
       const wrapper = document.createElement("div");
