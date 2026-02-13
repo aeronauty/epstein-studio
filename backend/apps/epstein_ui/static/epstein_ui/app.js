@@ -126,6 +126,7 @@ let activeAnnotationId = null;
 let activeAnnotationViewOnly = false;
 let annotationCounter = 0;
 const annotations = new Map();
+const annotationSnapshots = new Map();
 let annotationPreview = null;
 const annotationAnchors = new Map();
 let heatmapCtx = null;
@@ -499,6 +500,10 @@ function activateAnnotation(id, { viewOnly = false } = {}) {
   activeAnnotationId = id;
   activeAnnotationViewOnly = viewOnly;
   const ann = annotations.get(id);
+  if (!viewOnly && ann && !ann.isNew && !annotationSnapshots.has(id)) {
+    const snapshot = captureAnnotationSnapshot(id);
+    if (snapshot) annotationSnapshots.set(id, snapshot);
+  }
   if (notesInput && ann) {
     notesInput.value = ann.note || "";
   }
@@ -621,6 +626,74 @@ function getAnnotationElements(id) {
     (group) => group.dataset.annotation === id && !group.classList.contains("annotation-anchor")
   );
   return { textItems, hintItems };
+}
+
+function captureAnnotationSnapshot(id) {
+  const ann = annotations.get(id);
+  if (!ann) return null;
+  const textItems = Array.from(textLayer.querySelectorAll(".text-group"))
+    .filter((group) => group.dataset.annotation === id)
+    .map((group) => {
+      const { editor } = getGroupElements(group);
+      const pos = parseTranslate(group.getAttribute("transform") || "translate(0 0)");
+      const computed = window.getComputedStyle(editor);
+      return {
+        annotationId: id,
+        x: pos.x,
+        y: pos.y,
+        text: editor?.textContent || "",
+        fontFamily: group.dataset.font || computed.fontFamily,
+        fontSize: computed.fontSize,
+        fontWeight: computed.fontWeight,
+        fontStyle: computed.fontStyle,
+        fontKerning: computed.fontKerning,
+        fontFeatureSettings: computed.fontFeatureSettings,
+        fontVariantLigatures: computed.fontVariantLigatures,
+        color: computed.color,
+        opacity: parseFloat(computed.opacity) || 1,
+      };
+    });
+  const arrows = Array.from(hintLayer.querySelectorAll('g[data-type="arrow"]'))
+    .filter((group) => group.dataset.annotation === id)
+    .map((group) => {
+      const line = group.querySelector(".hint-arrow-line");
+      const handles = group.querySelectorAll(".hint-handle");
+      if (handles.length === 2) {
+        return {
+          annotationId: id,
+          x1: parseFloat(handles[0].getAttribute("cx")),
+          y1: parseFloat(handles[0].getAttribute("cy")),
+          x2: parseFloat(handles[1].getAttribute("cx")),
+          y2: parseFloat(handles[1].getAttribute("cy")),
+        };
+      }
+      return {
+        annotationId: id,
+        x1: parseFloat(line.getAttribute("x1")),
+        y1: parseFloat(line.getAttribute("y1")),
+        x2: parseFloat(line.dataset.rawX2 || line.getAttribute("x2")),
+        y2: parseFloat(line.dataset.rawY2 || line.getAttribute("y2")),
+      };
+    });
+  return { annotation: { ...ann }, textItems, arrows };
+}
+
+function restoreAnnotationSnapshot(id) {
+  const snapshot = annotationSnapshots.get(id);
+  if (!snapshot) return;
+  const { textItems, hintItems } = getAnnotationElements(id);
+  textItems.forEach((group) => group.remove());
+  hintItems.forEach((group) => group.remove());
+  annotations.set(id, { ...snapshot.annotation, isNew: false });
+  snapshot.textItems.forEach((item) => createTextBoxFromData(item));
+  snapshot.arrows.forEach((item) => addArrowFromData(item));
+  ensureAnnotationAnchor(id);
+  setAnnotationElementsVisible(id, true);
+  if (notesInput) {
+    notesInput.value = snapshot.annotation.note || "";
+  }
+  annotationSnapshots.delete(id);
+  renderNotesList();
 }
 
 // Hide/show annotation elements (anchors are controlled separately).
@@ -790,6 +863,7 @@ function removeAnnotationById(id, { persist = true } = {}) {
     anchor.remove();
     annotationAnchors.delete(id);
   }
+  annotationSnapshots.delete(id);
   annotations.delete(id);
   if (activeAnnotationId === id) {
     activeAnnotationId = null;
@@ -808,7 +882,14 @@ function discardActiveAnnotation() {
     clearActiveAnnotation();
     return;
   }
-  removeAnnotationById(activeAnnotationId);
+  const id = activeAnnotationId;
+  const ann = annotations.get(id);
+  if (ann && ann.isNew) {
+    removeAnnotationById(id);
+    return;
+  }
+  restoreAnnotationSnapshot(id);
+  activateAnnotation(id, { viewOnly: true });
 }
 
 // Collapse active annotation into its anchor, then persist.
@@ -827,6 +908,11 @@ function commitActiveAnnotation() {
     removeAnnotationById(id);
     return;
   }
+  const ann = annotations.get(id);
+  if (ann) {
+    ann.isNew = false;
+  }
+  annotationSnapshots.delete(id);
   ensureAnnotationAnchor(id);
   setAnnotationElementsVisible(id, false);
   activeAnnotationId = null;
@@ -2694,6 +2780,7 @@ function clearOverlays() {
   updateMinimapHeatmap();
   annotationAnchors.forEach((anchor) => anchor.remove());
   annotationAnchors.clear();
+  annotationSnapshots.clear();
   activeGroup = null;
   activeHint = null;
   annotations.clear();
@@ -2811,6 +2898,7 @@ async function loadAnnotationsForPdf(pdfName) {
         note: ann.note || "",
         user: ann.user || "",
         isOwner: ann.is_owner ?? false,
+        isNew: false,
         upvotes: ann.upvotes || 0,
         downvotes: ann.downvotes || 0,
         userVote: ann.user_vote || 0,
@@ -3325,6 +3413,7 @@ svg.addEventListener("pointerdown", (evt) => {
       x: point.x,
       y: point.y,
       isOwner: true,
+      isNew: true,
       hash,
       createdAt: new Date().toISOString(),
     });
