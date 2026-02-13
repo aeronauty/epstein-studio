@@ -24,6 +24,7 @@ const fontSelect = document.getElementById("fontSelect");
 const sizeRange = document.getElementById("sizeRange");
 const sizeInput = document.getElementById("sizeInput");
 const kerningToggle = document.getElementById("kerningToggle");
+const ligatureToggle = document.getElementById("ligatureToggle");
 const colorPicker = document.getElementById("colorPicker");
 const opacityRange = document.getElementById("opacityRange");
 const createAnnotationBtn = document.getElementById("createAnnotationBtn");
@@ -74,6 +75,21 @@ const discussionEditBtn = document.getElementById("discussionEditBtn");
 const isAuthenticated = document.body.dataset.auth === "1";
 const initialReplyId = new URLSearchParams(window.location.search).get("reply");
 const notificationDots = document.querySelectorAll(".notif-dot");
+
+function normalizeFontValue(value) {
+  if (!value) return "";
+  const first = value.split(",")[0] || "";
+  return first.replace(/['"]/g, "").trim().toLowerCase();
+}
+
+function pickFontOption(value) {
+  if (!value) return null;
+  const target = normalizeFontValue(value);
+  const option = Array.from(fontSelect.options).find(
+    (opt) => normalizeFontValue(opt.value) === target
+  );
+  return option ? option.value : null;
+}
 let initialTargetHash = document.body.dataset.targetHash || "";
 
 // --- Shared state (viewport, active elements, annotations) ---
@@ -1886,8 +1902,11 @@ function applyStylesToGroup(group) {
   editor.style.fontWeight = boldToggle.classList.contains("active") ? "700" : "400";
   editor.style.fontStyle = italicToggle.classList.contains("active") ? "italic" : "normal";
   const kerningOn = kerningToggle.classList.contains("active");
+  const ligatureOn = ligatureToggle?.classList.contains("active");
   editor.style.fontKerning = kerningOn ? "normal" : "none";
   editor.style.fontFeatureSettings = kerningOn ? "\"kern\" 1" : "\"kern\" 0";
+  editor.style.fontVariantLigatures = ligatureOn ? "normal" : "none";
+  editor.style.fontFeatureSettings = `${editor.style.fontFeatureSettings}, "liga" ${ligatureOn ? 1 : 0}`;
   editor.style.color = colorPicker.value;
   editor.style.opacity = opacity;
   box.style.stroke = colorPicker.value;
@@ -1925,14 +1944,17 @@ function setActiveGroup(group) {
   const computed = window.getComputedStyle(editor);
   const storedFont = group.dataset.font;
   if (storedFont) {
-    fontSelect.value = storedFont;
+    const picked = pickFontOption(storedFont);
+    if (picked) {
+      fontSelect.value = picked;
+    } else {
+      fontSelect.value = storedFont;
+    }
   } else {
     const computedFont = computed.fontFamily || "";
-    const option = Array.from(fontSelect.options).find((opt) =>
-      computedFont.includes(opt.value.split(",")[0].replace(/['\"]/g, "").trim())
-    );
-    if (option) {
-      fontSelect.value = option.value;
+    const picked = pickFontOption(computedFont);
+    if (picked) {
+      fontSelect.value = picked;
     }
   }
   sizeRange.value = parseFloat(computed.fontSize) || sizeRange.value;
@@ -1940,6 +1962,11 @@ function setActiveGroup(group) {
   const kerningOn = computed.fontKerning !== "none";
   kerningToggle.classList.toggle("active", kerningOn);
   kerningToggle.textContent = kerningOn ? "On" : "Off";
+  if (ligatureToggle) {
+    const ligatureOn = computed.fontVariantLigatures !== "none";
+    ligatureToggle.classList.toggle("active", ligatureOn);
+    ligatureToggle.textContent = ligatureOn ? "On" : "Off";
+  }
   colorPicker.value = rgbToHex(computed.color || "#39ff14");
   if (colorSwatch) {
     const swatch = colorSwatch.querySelector(".swatch-letter");
@@ -2299,12 +2326,16 @@ function createTextBoxFromData(data) {
   group.appendChild(handle);
   textLayer.appendChild(group);
 
-  editor.style.fontFamily = data.fontFamily || fontSelect.value;
+  const desiredFont = data.fontFamily || fontSelect.value;
+  const pickedFont = pickFontOption(desiredFont);
+  editor.style.fontFamily = pickedFont || desiredFont;
+  group.dataset.font = editor.style.fontFamily;
   editor.style.fontSize = data.fontSize || `${sizeRange.value}px`;
   editor.style.fontWeight = data.fontWeight || "400";
   editor.style.fontStyle = data.fontStyle || "normal";
   editor.style.fontKerning = data.fontKerning || "none";
-  editor.style.fontFeatureSettings = data.fontFeatureSettings || "\"kern\" 0";
+  editor.style.fontFeatureSettings = data.fontFeatureSettings || "\"kern\" 0, \"liga\" 0";
+  editor.style.fontVariantLigatures = data.fontVariantLigatures || "none";
   editor.style.color = data.color || colorPicker.value;
   editor.style.opacity = data.opacity ?? 1;
   group.dataset.font = editor.style.fontFamily;
@@ -2696,6 +2727,7 @@ function serializeCurrentState() {
       fontStyle: computed.fontStyle,
       fontKerning: computed.fontKerning,
       fontFeatureSettings: computed.fontFeatureSettings,
+      fontVariantLigatures: computed.fontVariantLigatures,
       color: computed.color,
       opacity: parseFloat(computed.opacity) || 1,
     };
@@ -2797,6 +2829,7 @@ async function loadAnnotationsForPdf(pdfName) {
           fontStyle: item.fontStyle,
           fontKerning: item.fontKerning,
           fontFeatureSettings: item.fontFeatureSettings,
+          fontVariantLigatures: item.fontVariantLigatures,
           color: item.color,
           opacity: item.opacity,
         });
@@ -2847,6 +2880,7 @@ async function saveAnnotationsForPdf() {
             fontStyle: computed.fontStyle,
             fontKerning: computed.fontKerning,
             fontFeatureSettings: computed.fontFeatureSettings,
+            fontVariantLigatures: computed.fontVariantLigatures,
             color: computed.color,
             opacity: parseFloat(computed.opacity) || 1,
           };
@@ -3082,6 +3116,16 @@ kerningToggle.addEventListener("click", () => {
     applyStylesToGroup(activeGroup);
   }
 });
+
+if (ligatureToggle) {
+  ligatureToggle.addEventListener("click", () => {
+    ligatureToggle.classList.toggle("active");
+    ligatureToggle.textContent = ligatureToggle.classList.contains("active") ? "On" : "Off";
+    if (activeGroup) {
+      applyStylesToGroup(activeGroup);
+    }
+  });
+}
 colorPicker.addEventListener("input", () => {
   if (colorSwatch) {
     const swatch = colorSwatch.querySelector(".swatch-letter");
