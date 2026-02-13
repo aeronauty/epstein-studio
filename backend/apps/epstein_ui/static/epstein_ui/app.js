@@ -287,6 +287,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.remove("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     tabsList.forEach((tab) => {
       tab.disabled = true;
     });
@@ -312,6 +313,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     tabsList.forEach((tab) => {
       tab.disabled = false;
     });
@@ -336,6 +338,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.remove("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     if (notesInput) notesInput.closest(".field")?.classList.add("hidden");
     if (annotationViewTitle) {
       const ann = annotations.get(activeAnnotationId);
@@ -372,6 +375,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     if (notesInput) notesInput.classList.remove("hidden");
     tabsList.forEach((tab) => {
       tab.disabled = false;
