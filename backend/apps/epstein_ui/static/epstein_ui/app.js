@@ -3153,6 +3153,7 @@ notesInput.addEventListener("input", () => {
 });
 
 textLayer.addEventListener("pointerdown", (evt) => {
+  if (activeTab === "hints") return;
   const hitPoint = svgPointInViewport(evt);
   const hitAnchor = findAnchorAtPoint(hitPoint, 12);
   if (hitAnchor) {
@@ -3324,6 +3325,7 @@ svg.addEventListener("pointerdown", (evt) => {
   }
 });
 textLayer.addEventListener("pointerdown", (evt) => {
+  if (activeTab === "hints") return;
   if (!isAuthenticated) return;
   if (evt.target.classList.contains("resize-handle")) {
     onResizeStart(evt);
