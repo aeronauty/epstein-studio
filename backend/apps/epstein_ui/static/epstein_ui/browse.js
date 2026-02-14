@@ -5,6 +5,7 @@ const notificationDots = document.querySelectorAll(".notif-dot");
 const randomBtn = document.getElementById("browseRandom");
 const searchInput = document.getElementById("browseSearch");
 const searchBtn = document.getElementById("browseSearchBtn");
+const browseCount = document.getElementById("browseCount");
 
 let page = 1;
 let loading = false;
@@ -68,6 +69,9 @@ async function loadPage() {
     const data = await response.json();
     (data.items || []).forEach(appendCard);
     hasMore = Boolean(data.has_more);
+    if (browseCount && typeof data.total === "number") {
+      browseCount.textContent = `(${data.total})`;
+    }
     page += 1;
     if (!hasMore && moreBtn) {
       moreBtn.classList.add("hidden");

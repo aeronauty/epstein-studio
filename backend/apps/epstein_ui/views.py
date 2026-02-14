@@ -319,7 +319,9 @@ def browse_list(request):
         for doc in docs
     ]
     has_more = end < total
-    return JsonResponse({"items": items, "page": page_num, "has_more": has_more})
+    return JsonResponse(
+        {"items": items, "page": page_num, "has_more": has_more, "total": total}
+    )
 
 
 @csrf_exempt
