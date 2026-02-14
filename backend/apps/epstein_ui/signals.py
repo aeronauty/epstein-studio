@@ -2,7 +2,7 @@ from django.db.models import Sum
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from .models import Annotation, PdfDocument, PdfVote
+from .models import Annotation, PdfComment, PdfDocument, PdfVote
 
 
 def _refresh_annotation_count(pdf_key: str) -> None:
@@ -27,6 +27,23 @@ def _annotation_saved(sender, instance, **kwargs):
 @receiver(post_delete, sender=Annotation)
 def _annotation_deleted(sender, instance, **kwargs):
     _refresh_annotation_count(instance.pdf_key)
+
+
+def _refresh_comment_count(pdf_id: int) -> None:
+    if not pdf_id:
+        return
+    count = PdfComment.objects.filter(pdf_id=pdf_id).count()
+    PdfDocument.objects.filter(id=pdf_id).update(comment_count=count)
+
+
+@receiver(post_save, sender=PdfComment)
+def _pdf_comment_saved(sender, instance, **kwargs):
+    _refresh_comment_count(instance.pdf_id)
+
+
+@receiver(post_delete, sender=PdfComment)
+def _pdf_comment_deleted(sender, instance, **kwargs):
+    _refresh_comment_count(instance.pdf_id)
 
 
 @receiver(post_save, sender=PdfVote)
