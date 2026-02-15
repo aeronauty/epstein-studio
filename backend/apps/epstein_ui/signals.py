@@ -9,6 +9,7 @@ def _refresh_annotation_count(pdf_key: str) -> None:
     if not pdf_key:
         return
     count = Annotation.objects.filter(pdf_key=pdf_key).count()
+    count += PdfComment.objects.filter(pdf__filename=pdf_key).count()
     PdfDocument.objects.filter(filename=pdf_key).update(annotation_count=count)
 
 
@@ -29,21 +30,16 @@ def _annotation_deleted(sender, instance, **kwargs):
     _refresh_annotation_count(instance.pdf_key)
 
 
-def _refresh_comment_count(pdf_id: int) -> None:
-    if not pdf_id:
-        return
-    count = PdfComment.objects.filter(pdf_id=pdf_id).count()
-    PdfDocument.objects.filter(id=pdf_id).update(comment_count=count)
-
-
 @receiver(post_save, sender=PdfComment)
 def _pdf_comment_saved(sender, instance, **kwargs):
-    _refresh_comment_count(instance.pdf_id)
+    if instance.pdf_id:
+        _refresh_annotation_count(instance.pdf.filename)
 
 
 @receiver(post_delete, sender=PdfComment)
 def _pdf_comment_deleted(sender, instance, **kwargs):
-    _refresh_comment_count(instance.pdf_id)
+    if instance.pdf_id:
+        _refresh_annotation_count(instance.pdf.filename)
 
 
 @receiver(post_save, sender=PdfVote)
