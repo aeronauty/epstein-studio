@@ -16,8 +16,8 @@
       </div>
       <div id="confirmOverlay" class="confirm-overlay hidden">
         <div class="confirm-dialog">
-          <div class="confirm-title">Delete comment?</div>
-          <div class="confirm-text">This will delete the comment and all replies.</div>
+          <div id="confirmTitle" class="confirm-title">Delete comment?</div>
+          <div id="confirmText" class="confirm-text">This will delete the comment and all replies.</div>
           <div class="confirm-actions">
             <button id="confirmCancel" class="btn btn-outline" type="button">Cancel</button>
             <button id="confirmOk" class="btn" type="button">Delete</button>
@@ -122,7 +122,8 @@
                   <div id="discussionLoginHint" class="discussion-hint hidden">Login to comment or vote.</div>
                 </div>
                 <div class="discussion-actions">
-                  <button id="discussionEditBtn" class="btn hidden" type="button">Edit Annotation</button>
+                  <button id="discussionEditBtn" class="btn hidden" type="button">Edit</button>
+                  <button id="discussionDeleteBtn" class="btn btn-outline btn-outline-danger hidden" type="button">Delete</button>
                 </div>
               </div>
               <label class="field">
@@ -137,6 +138,9 @@
                 <select id="fontSelect">
                   <option value="'Calibri', 'Segoe UI', sans-serif" selected>Calibri</option>
                   <option value="'Times New Roman', serif">Times New Roman</option>
+                  <option value="'Cambria', serif">Cambria</option>
+                  <option value="'Arial', sans-serif">Arial</option>
+                  <option value="'Courier New', monospace">Courier New</option>
                 </select>
               </label>
               <div class="field">
@@ -149,14 +153,20 @@
               <label class="field">
                 <span>Size</span>
                 <div class="size-row">
-                  <input id="sizeRange" type="range" min="12" max="72" value="24" step="0.01" />
-                  <input id="sizeInput" type="number" min="12" max="72" step="0.01" value="24" />
+                  <input id="sizeRange" type="range" min="10" max="40" value="14.7" step="0.01" />
+                  <input id="sizeInput" type="number" min="10" max="40" step="0.01" value="14.7" />
                 </div>
               </label>
               <label class="field">
                 <span>Kerning</span>
                 <div class="toggle-row">
                   <button id="kerningToggle" class="btn btn-secondary" type="button">Off</button>
+                </div>
+              </label>
+              <label class="field">
+                <span>Ligatures</span>
+                <div class="toggle-row">
+                  <button id="ligatureToggle" class="btn btn-secondary" type="button">Off</button>
                 </div>
               </label>
               <div class="field">
@@ -176,7 +186,7 @@
             </div>
             <div class="annotation-actions">
               <button id="commitAnnotationBtn" class="btn">Commit Annotation</button>
-              <button id="discardAnnotationBtn" class="btn btn-outline">Delete Annotation</button>
+              <button id="discardAnnotationBtn" class="btn btn-outline">Discard Changes</button>
             </div>
           </div>
         </section>

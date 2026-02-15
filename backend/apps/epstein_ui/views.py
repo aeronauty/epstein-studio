@@ -381,7 +381,9 @@ def browse_list(request):
         for doc in docs
     ]
     has_more = end < total
-    return JsonResponse({"items": items, "page": page_num, "has_more": has_more})
+    return JsonResponse(
+        {"items": items, "page": page_num, "has_more": has_more, "total": total}
+    )
 
 
 @csrf_exempt
@@ -664,6 +666,7 @@ def annotations_api(request):
         delete_qs.delete()
         PdfDocument.objects.filter(filename=pdf_key).update(
             annotation_count=Annotation.objects.filter(pdf_key=pdf_key).count()
+            + PdfComment.objects.filter(pdf__filename=pdf_key).count()
         )
         return JsonResponse({"ok": True, "mappings": saved_mappings})
 

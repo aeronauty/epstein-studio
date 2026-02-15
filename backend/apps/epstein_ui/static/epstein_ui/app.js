@@ -24,6 +24,7 @@ const fontSelect = document.getElementById("fontSelect");
 const sizeRange = document.getElementById("sizeRange");
 const sizeInput = document.getElementById("sizeInput");
 const kerningToggle = document.getElementById("kerningToggle");
+const ligatureToggle = document.getElementById("ligatureToggle");
 const colorPicker = document.getElementById("colorPicker");
 const opacityRange = document.getElementById("opacityRange");
 const createAnnotationBtn = document.getElementById("createAnnotationBtn");
@@ -64,6 +65,8 @@ const annotationViewBack = document.getElementById("annotationViewBack");
 const confirmOverlay = document.getElementById("confirmOverlay");
 const confirmCancel = document.getElementById("confirmCancel");
 const confirmOk = document.getElementById("confirmOk");
+const confirmTitle = document.getElementById("confirmTitle");
+const confirmText = document.getElementById("confirmText");
 const discussionPanel = document.getElementById("discussionPanel");
 const discussionList = document.getElementById("discussionList");
 const discussionForm = document.getElementById("discussionForm");
@@ -71,9 +74,25 @@ const discussionInput = document.getElementById("discussionInput");
 const discussionSubmit = document.getElementById("discussionSubmit");
 const discussionLoginHint = document.getElementById("discussionLoginHint");
 const discussionEditBtn = document.getElementById("discussionEditBtn");
+const discussionDeleteBtn = document.getElementById("discussionDeleteBtn");
 const isAuthenticated = document.body.dataset.auth === "1";
 const initialReplyId = new URLSearchParams(window.location.search).get("reply");
 const notificationDots = document.querySelectorAll(".notif-dot");
+
+function normalizeFontValue(value) {
+  if (!value) return "";
+  const first = value.split(",")[0] || "";
+  return first.replace(/['"]/g, "").trim().toLowerCase();
+}
+
+function pickFontOption(value) {
+  if (!value) return null;
+  const target = normalizeFontValue(value);
+  const option = Array.from(fontSelect.options).find(
+    (opt) => normalizeFontValue(opt.value) === target
+  );
+  return option ? option.value : null;
+}
 let initialTargetHash = document.body.dataset.targetHash || "";
 
 // --- Shared state (viewport, active elements, annotations) ---
@@ -85,7 +104,7 @@ let view = { x: 0, y: 0, scale: 1 };
 let isResizing = false;
 let canvasSize = { width: 900, height: 520 };
 let firstPageWidth = 900;
-const DEFAULT_TEXT_SIZE = 24;
+const DEFAULT_TEXT_SIZE = 14.7;
 const VIEW_W = 900;
 const VIEW_H = 520;
 const PAGE_GAP = 24;
@@ -110,6 +129,7 @@ let activeAnnotationId = null;
 let activeAnnotationViewOnly = false;
 let annotationCounter = 0;
 const annotations = new Map();
+const annotationSnapshots = new Map();
 let annotationPreview = null;
 const annotationAnchors = new Map();
 let heatmapCtx = null;
@@ -267,6 +287,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.remove("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     tabsList.forEach((tab) => {
       tab.disabled = true;
     });
@@ -292,6 +313,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     tabsList.forEach((tab) => {
       tab.disabled = false;
     });
@@ -316,6 +338,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.remove("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     if (notesInput) notesInput.closest(".field")?.classList.add("hidden");
     if (annotationViewTitle) {
       const ann = annotations.get(activeAnnotationId);
@@ -352,6 +375,7 @@ function updateAnnotationPanelMode() {
     }
     if (discussionPanel) discussionPanel.classList.add("hidden");
     if (discussionEditBtn) discussionEditBtn.classList.add("hidden");
+    if (discussionDeleteBtn) discussionDeleteBtn.classList.add("hidden");
     if (notesInput) notesInput.classList.remove("hidden");
     tabsList.forEach((tab) => {
       tab.disabled = false;
@@ -483,6 +507,10 @@ function activateAnnotation(id, { viewOnly = false } = {}) {
   activeAnnotationId = id;
   activeAnnotationViewOnly = viewOnly;
   const ann = annotations.get(id);
+  if (!viewOnly && ann && !ann.isNew && !annotationSnapshots.has(id)) {
+    const snapshot = captureAnnotationSnapshot(id);
+    if (snapshot) annotationSnapshots.set(id, snapshot);
+  }
   if (notesInput && ann) {
     notesInput.value = ann.note || "";
   }
@@ -605,6 +633,74 @@ function getAnnotationElements(id) {
     (group) => group.dataset.annotation === id && !group.classList.contains("annotation-anchor")
   );
   return { textItems, hintItems };
+}
+
+function captureAnnotationSnapshot(id) {
+  const ann = annotations.get(id);
+  if (!ann) return null;
+  const textItems = Array.from(textLayer.querySelectorAll(".text-group"))
+    .filter((group) => group.dataset.annotation === id)
+    .map((group) => {
+      const { editor } = getGroupElements(group);
+      const pos = parseTranslate(group.getAttribute("transform") || "translate(0 0)");
+      const computed = window.getComputedStyle(editor);
+      return {
+        annotationId: id,
+        x: pos.x,
+        y: pos.y,
+        text: editor?.textContent || "",
+        fontFamily: group.dataset.font || computed.fontFamily,
+        fontSize: computed.fontSize,
+        fontWeight: computed.fontWeight,
+        fontStyle: computed.fontStyle,
+        fontKerning: computed.fontKerning,
+        fontFeatureSettings: computed.fontFeatureSettings,
+        fontVariantLigatures: computed.fontVariantLigatures,
+        color: computed.color,
+        opacity: parseFloat(computed.opacity) || 1,
+      };
+    });
+  const arrows = Array.from(hintLayer.querySelectorAll('g[data-type="arrow"]'))
+    .filter((group) => group.dataset.annotation === id)
+    .map((group) => {
+      const line = group.querySelector(".hint-arrow-line");
+      const handles = group.querySelectorAll(".hint-handle");
+      if (handles.length === 2) {
+        return {
+          annotationId: id,
+          x1: parseFloat(handles[0].getAttribute("cx")),
+          y1: parseFloat(handles[0].getAttribute("cy")),
+          x2: parseFloat(handles[1].getAttribute("cx")),
+          y2: parseFloat(handles[1].getAttribute("cy")),
+        };
+      }
+      return {
+        annotationId: id,
+        x1: parseFloat(line.getAttribute("x1")),
+        y1: parseFloat(line.getAttribute("y1")),
+        x2: parseFloat(line.dataset.rawX2 || line.getAttribute("x2")),
+        y2: parseFloat(line.dataset.rawY2 || line.getAttribute("y2")),
+      };
+    });
+  return { annotation: { ...ann }, textItems, arrows };
+}
+
+function restoreAnnotationSnapshot(id) {
+  const snapshot = annotationSnapshots.get(id);
+  if (!snapshot) return;
+  const { textItems, hintItems } = getAnnotationElements(id);
+  textItems.forEach((group) => group.remove());
+  hintItems.forEach((group) => group.remove());
+  annotations.set(id, { ...snapshot.annotation, isNew: false });
+  snapshot.textItems.forEach((item) => createTextBoxFromData(item));
+  snapshot.arrows.forEach((item) => addArrowFromData(item));
+  ensureAnnotationAnchor(id);
+  setAnnotationElementsVisible(id, true);
+  if (notesInput) {
+    notesInput.value = snapshot.annotation.note || "";
+  }
+  annotationSnapshots.delete(id);
+  renderNotesList();
 }
 
 // Hide/show annotation elements (anchors are controlled separately).
@@ -774,6 +870,7 @@ function removeAnnotationById(id, { persist = true } = {}) {
     anchor.remove();
     annotationAnchors.delete(id);
   }
+  annotationSnapshots.delete(id);
   annotations.delete(id);
   if (activeAnnotationId === id) {
     activeAnnotationId = null;
@@ -792,7 +889,14 @@ function discardActiveAnnotation() {
     clearActiveAnnotation();
     return;
   }
-  removeAnnotationById(activeAnnotationId);
+  const id = activeAnnotationId;
+  const ann = annotations.get(id);
+  if (ann && ann.isNew) {
+    removeAnnotationById(id);
+    return;
+  }
+  restoreAnnotationSnapshot(id);
+  activateAnnotation(id, { viewOnly: true });
 }
 
 // Collapse active annotation into its anchor, then persist.
@@ -811,6 +915,11 @@ function commitActiveAnnotation() {
     removeAnnotationById(id);
     return;
   }
+  const ann = annotations.get(id);
+  if (ann) {
+    ann.isNew = false;
+  }
+  annotationSnapshots.delete(id);
   ensureAnnotationAnchor(id);
   setAnnotationElementsVisible(id, false);
   activeAnnotationId = null;
@@ -1256,7 +1365,10 @@ function renderDiscussion(annotationId, comments) {
     deleteBtn.disabled = !canDelete;
     deleteBtn.addEventListener("click", async () => {
       if (!canDelete) return;
-      showConfirm(async () => {
+      showConfirm({
+        title: "Delete comment?",
+        text: "This will delete the comment and all replies.",
+        onOk: async () => {
         const result = await deleteComment(comment.id);
         if (!result || !result.ok) return;
         const removeIds = new Set([comment.id]);
@@ -1274,6 +1386,7 @@ function renderDiscussion(annotationId, comments) {
         comments.length = 0;
         next.forEach((c) => comments.push(c));
         renderDiscussion(annotationId, comments);
+        },
       });
     });
 
@@ -1433,7 +1546,10 @@ function renderPdfCommentDiscussion(commentId, replies) {
     deleteBtn.disabled = !canDelete;
     deleteBtn.addEventListener("click", async () => {
       if (!canDelete) return;
-      showConfirm(async () => {
+      showConfirm({
+        title: "Delete comment?",
+        text: "This will delete the comment and all replies.",
+        onOk: async () => {
         const result = await deletePdfReply(comment.id);
         if (!result || !result.ok) return;
         const removeIds = new Set([comment.id]);
@@ -1451,6 +1567,7 @@ function renderPdfCommentDiscussion(commentId, replies) {
         replies.length = 0;
         next.forEach((c) => replies.push(c));
         renderPdfCommentDiscussion(commentId, replies);
+        },
       });
     });
 
@@ -1487,6 +1604,10 @@ async function loadDiscussionForAnnotation(annotationId) {
   if (discussionEditBtn) {
     const ann = annotations.get(activeAnnotationId);
     discussionEditBtn.classList.toggle("hidden", !(ann && ann.isOwner && isAuthenticated));
+  }
+  if (discussionDeleteBtn) {
+    const ann = annotations.get(activeAnnotationId);
+    discussionDeleteBtn.classList.toggle("hidden", !(ann && ann.isOwner && isAuthenticated));
   }
   if (commentCache.has(annotationId)) {
     renderDiscussion(annotationId, commentCache.get(annotationId));
@@ -1886,8 +2007,11 @@ function applyStylesToGroup(group) {
   editor.style.fontWeight = boldToggle.classList.contains("active") ? "700" : "400";
   editor.style.fontStyle = italicToggle.classList.contains("active") ? "italic" : "normal";
   const kerningOn = kerningToggle.classList.contains("active");
+  const ligatureOn = ligatureToggle?.classList.contains("active");
   editor.style.fontKerning = kerningOn ? "normal" : "none";
   editor.style.fontFeatureSettings = kerningOn ? "\"kern\" 1" : "\"kern\" 0";
+  editor.style.fontVariantLigatures = ligatureOn ? "normal" : "none";
+  editor.style.fontFeatureSettings = `${editor.style.fontFeatureSettings}, "liga" ${ligatureOn ? 1 : 0}`;
   editor.style.color = colorPicker.value;
   editor.style.opacity = opacity;
   box.style.stroke = colorPicker.value;
@@ -1925,14 +2049,17 @@ function setActiveGroup(group) {
   const computed = window.getComputedStyle(editor);
   const storedFont = group.dataset.font;
   if (storedFont) {
-    fontSelect.value = storedFont;
+    const picked = pickFontOption(storedFont);
+    if (picked) {
+      fontSelect.value = picked;
+    } else {
+      fontSelect.value = storedFont;
+    }
   } else {
     const computedFont = computed.fontFamily || "";
-    const option = Array.from(fontSelect.options).find((opt) =>
-      computedFont.includes(opt.value.split(",")[0].replace(/['\"]/g, "").trim())
-    );
-    if (option) {
-      fontSelect.value = option.value;
+    const picked = pickFontOption(computedFont);
+    if (picked) {
+      fontSelect.value = picked;
     }
   }
   sizeRange.value = parseFloat(computed.fontSize) || sizeRange.value;
@@ -1940,6 +2067,11 @@ function setActiveGroup(group) {
   const kerningOn = computed.fontKerning !== "none";
   kerningToggle.classList.toggle("active", kerningOn);
   kerningToggle.textContent = kerningOn ? "On" : "Off";
+  if (ligatureToggle) {
+    const ligatureOn = computed.fontVariantLigatures !== "none";
+    ligatureToggle.classList.toggle("active", ligatureOn);
+    ligatureToggle.textContent = ligatureOn ? "On" : "Off";
+  }
   colorPicker.value = rgbToHex(computed.color || "#39ff14");
   if (colorSwatch) {
     const swatch = colorSwatch.querySelector(".swatch-letter");
@@ -2074,9 +2206,15 @@ function closeContextMenu() {
   contextTarget = null;
 }
 
-function showConfirm(onOk) {
+function showConfirm({ title, text, onOk }) {
   if (!confirmOverlay || !confirmOk) return;
   pendingConfirm = onOk;
+  if (confirmTitle && typeof title === "string") {
+    confirmTitle.textContent = title;
+  }
+  if (confirmText && typeof text === "string") {
+    confirmText.textContent = text;
+  }
   confirmOverlay.classList.remove("hidden");
 }
 
@@ -2299,12 +2437,16 @@ function createTextBoxFromData(data) {
   group.appendChild(handle);
   textLayer.appendChild(group);
 
-  editor.style.fontFamily = data.fontFamily || fontSelect.value;
+  const desiredFont = data.fontFamily || fontSelect.value;
+  const pickedFont = pickFontOption(desiredFont);
+  editor.style.fontFamily = pickedFont || desiredFont;
+  group.dataset.font = editor.style.fontFamily;
   editor.style.fontSize = data.fontSize || `${sizeRange.value}px`;
   editor.style.fontWeight = data.fontWeight || "400";
   editor.style.fontStyle = data.fontStyle || "normal";
   editor.style.fontKerning = data.fontKerning || "none";
-  editor.style.fontFeatureSettings = data.fontFeatureSettings || "\"kern\" 0";
+  editor.style.fontFeatureSettings = data.fontFeatureSettings || "\"kern\" 0, \"liga\" 0";
+  editor.style.fontVariantLigatures = data.fontVariantLigatures || "none";
   editor.style.color = data.color || colorPicker.value;
   editor.style.opacity = data.opacity ?? 1;
   group.dataset.font = editor.style.fontFamily;
@@ -2371,7 +2513,7 @@ function onResizeMove(evt) {
   const now = svgPointInViewport(evt);
   const targetDx = now.x - resizeState.start.x;
   const scaleFactor = Math.max(0.2, (resizeState.startWidth + targetDx) / resizeState.startWidth);
-  const nextSize = Math.max(12, Math.min(72, resizeState.startSize * scaleFactor));
+  const nextSize = Math.max(10, Math.min(40, resizeState.startSize * scaleFactor));
   sizeRange.value = nextSize;
   applyStylesToGroup(resizeState.group);
 }
@@ -2663,6 +2805,7 @@ function clearOverlays() {
   updateMinimapHeatmap();
   annotationAnchors.forEach((anchor) => anchor.remove());
   annotationAnchors.clear();
+  annotationSnapshots.clear();
   activeGroup = null;
   activeHint = null;
   annotations.clear();
@@ -2696,6 +2839,7 @@ function serializeCurrentState() {
       fontStyle: computed.fontStyle,
       fontKerning: computed.fontKerning,
       fontFeatureSettings: computed.fontFeatureSettings,
+      fontVariantLigatures: computed.fontVariantLigatures,
       color: computed.color,
       opacity: parseFloat(computed.opacity) || 1,
     };
@@ -2779,6 +2923,7 @@ async function loadAnnotationsForPdf(pdfName) {
         note: ann.note || "",
         user: ann.user || "",
         isOwner: ann.is_owner ?? false,
+        isNew: false,
         upvotes: ann.upvotes || 0,
         downvotes: ann.downvotes || 0,
         userVote: ann.user_vote || 0,
@@ -2797,6 +2942,7 @@ async function loadAnnotationsForPdf(pdfName) {
           fontStyle: item.fontStyle,
           fontKerning: item.fontKerning,
           fontFeatureSettings: item.fontFeatureSettings,
+          fontVariantLigatures: item.fontVariantLigatures,
           color: item.color,
           opacity: item.opacity,
         });
@@ -2847,6 +2993,7 @@ async function saveAnnotationsForPdf() {
             fontStyle: computed.fontStyle,
             fontKerning: computed.fontKerning,
             fontFeatureSettings: computed.fontFeatureSettings,
+            fontVariantLigatures: computed.fontVariantLigatures,
             color: computed.color,
             opacity: parseFloat(computed.opacity) || 1,
           };
@@ -3082,6 +3229,16 @@ kerningToggle.addEventListener("click", () => {
     applyStylesToGroup(activeGroup);
   }
 });
+
+if (ligatureToggle) {
+  ligatureToggle.addEventListener("click", () => {
+    ligatureToggle.classList.toggle("active");
+    ligatureToggle.textContent = ligatureToggle.classList.contains("active") ? "On" : "Off";
+    if (activeGroup) {
+      applyStylesToGroup(activeGroup);
+    }
+  });
+}
 colorPicker.addEventListener("input", () => {
   if (colorSwatch) {
     const swatch = colorSwatch.querySelector(".swatch-letter");
@@ -3153,6 +3310,7 @@ notesInput.addEventListener("input", () => {
 });
 
 textLayer.addEventListener("pointerdown", (evt) => {
+  if (activeTab === "hints") return;
   const hitPoint = svgPointInViewport(evt);
   const hitAnchor = findAnchorAtPoint(hitPoint, 12);
   if (hitAnchor) {
@@ -3280,6 +3438,7 @@ svg.addEventListener("pointerdown", (evt) => {
       x: point.x,
       y: point.y,
       isOwner: true,
+      isNew: true,
       hash,
       createdAt: new Date().toISOString(),
     });
@@ -3324,6 +3483,7 @@ svg.addEventListener("pointerdown", (evt) => {
   }
 });
 textLayer.addEventListener("pointerdown", (evt) => {
+  if (activeTab === "hints") return;
   if (!isAuthenticated) return;
   if (evt.target.classList.contains("resize-handle")) {
     onResizeStart(evt);
@@ -3475,7 +3635,13 @@ contextMenu.addEventListener("click", (evt) => {
       if (activeHint === group) activeHint = null;
       group.remove();
     } else if (type === "annotation") {
-      removeAnnotationById(id);
+      showConfirm({
+        title: "Delete annotation?",
+        text: "This will permanently delete the annotation.",
+        onOk: () => {
+          removeAnnotationById(id);
+        },
+      });
     }
   }
   if (action === "edit") {
@@ -3772,6 +3938,20 @@ if (discussionEditBtn) {
     const ann = annotations.get(activeAnnotationId);
     if (!ann || !ann.isOwner || !isAuthenticated) return;
     activateAnnotation(activeAnnotationId, { viewOnly: false });
+  });
+}
+
+if (discussionDeleteBtn) {
+  discussionDeleteBtn.addEventListener("click", () => {
+    const ann = annotations.get(activeAnnotationId);
+    if (!ann || !ann.isOwner || !isAuthenticated) return;
+    showConfirm({
+      title: "Delete annotation?",
+      text: "This will permanently delete the annotation.",
+      onOk: () => {
+        removeAnnotationById(activeAnnotationId);
+      },
+    });
   });
 }
 
