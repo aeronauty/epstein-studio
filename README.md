@@ -138,4 +138,4 @@ This is an open investigation tool. If you want to help:
 
 ## License
 
-This project is open source. Do whatever you want with it. The documents belong to the public.
+MIT LICENSE
