@@ -37,6 +37,8 @@
 - Local annotation persistence behavior:
   - Frontend stores annotations in `localStorage` (scoped by persistent `data-user` hash + PDF filename).
   - Annotation edits persist across reloads on the same browser/device profile.
+  - In Electron, each committed annotation edit also publishes a per-PDF state event over libp2p.
+  - Remote events from peers are merged into local state and reflected in the currently open PDF view.
 - Auth route behavior:
   - `/login/`, `/register/`, `/logout/`, and `/username-check/` are removed.
 - Run desktop app:

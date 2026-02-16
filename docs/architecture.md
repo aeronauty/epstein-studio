@@ -13,7 +13,8 @@
   - Electron main process in `electron/main.js`.
   - Starts Django locally, then loads the app URL in a desktop window.
   - Uses the default native OS title bar with standard window controls.
-  - Starts a local libp2p node (gossipsub + DHT) for annotation-network transport groundwork.
+  - Starts a local libp2p node (gossipsub + DHT) for annotation transport.
+  - Uses `electron/preload.js` to expose a narrow IPC bridge for annotation sync events.
 - API-like endpoints:
   - Implemented in `backend/apps/epstein_ui/views.py`.
 - Identity middleware:
@@ -51,6 +52,8 @@
 - Frontend annotation persistence is currently local-first:
   - `app.js` saves annotation state in browser `localStorage` per `(user_hash, pdf_key)`.
   - Reloading the same browser/device restores annotations without Django DB storage.
+  - In Electron, committed annotation state is broadcast as signed-less libp2p events (`epstein.annotation.state`) on `LIBP2P_TOPIC`.
+  - Incoming events update per-PDF local state and are immediately applied to the active canvas when viewing the same PDF.
 
 ## PDF Indexing and Counters
 - Index refresh command:

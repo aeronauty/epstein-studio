@@ -155,6 +155,12 @@ let activePdfDiscussion = false;
 let activePdfCommentId = null;
 let pdfCommentReplyCache = new Map();
 const LOCAL_ANNOTATION_STATE_VERSION = 1;
+const P2P_ANNOTATION_EVENT_KIND = "epstein.annotation.state";
+const P2P_ANNOTATION_EVENT_VERSION = 1;
+const p2pBridge = window.epsteinP2P || null;
+const p2pSessionId = generateHash();
+const p2pSeenEventIds = new Set();
+const p2pLastTimestampByPdf = new Map();
 
 function formatTimestamp(value, { dateOnly = false } = {}) {
   if (!value) return "";
@@ -222,6 +228,114 @@ function saveLocalAnnotationState(pdfName, state) {
   };
   try {
     window.localStorage.setItem(key, JSON.stringify(payload));
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function markSeenP2PEvent(eventId) {
+  if (!eventId) return;
+  p2pSeenEventIds.add(eventId);
+  if (p2pSeenEventIds.size > 2048) {
+    const iterator = p2pSeenEventIds.values();
+    const oldest = iterator.next().value;
+    if (oldest) {
+      p2pSeenEventIds.delete(oldest);
+    }
+  }
+}
+
+function normalizeAnnotationState(state) {
+  return {
+    annotations: Array.isArray(state?.annotations) ? state.annotations : [],
+    textItems: Array.isArray(state?.textItems) ? state.textItems : [],
+    arrows: Array.isArray(state?.arrows) ? state.arrows : [],
+  };
+}
+
+function currentAnnotationStateSnapshot(pdfName) {
+  if (currentPdfKey && pdfName === currentPdfKey) {
+    serializeCurrentState();
+  }
+  const state = normalizeAnnotationState(pdfState.get(pdfName));
+  return {
+    annotations: state.annotations.map((ann) => ({ ...ann, isNew: false })),
+    textItems: state.textItems.map((item) => ({ ...item })),
+    arrows: state.arrows.map((item) => ({ ...item })),
+  };
+}
+
+async function publishP2PAnnotationState(pdfName) {
+  if (!pdfName || !p2pBridge || typeof p2pBridge.publishAnnotationEvent !== "function") {
+    return;
+  }
+  const payload = {
+    kind: P2P_ANNOTATION_EVENT_KIND,
+    version: P2P_ANNOTATION_EVENT_VERSION,
+    eventId: generateHash(),
+    sessionId: p2pSessionId,
+    user: String(document.body.dataset.user || "anon"),
+    pdf: pdfName,
+    ts: Date.now(),
+    state: currentAnnotationStateSnapshot(pdfName),
+  };
+  markSeenP2PEvent(payload.eventId);
+  try {
+    await p2pBridge.publishAnnotationEvent(payload);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function applyP2PAnnotationState(eventPayload) {
+  if (!eventPayload || typeof eventPayload !== "object") return;
+  if (eventPayload.kind !== P2P_ANNOTATION_EVENT_KIND) return;
+  if (eventPayload.version !== P2P_ANNOTATION_EVENT_VERSION) return;
+  if (eventPayload.sessionId && eventPayload.sessionId === p2pSessionId) return;
+  if (!eventPayload.pdf || typeof eventPayload.pdf !== "string") return;
+  if (!eventPayload.eventId || typeof eventPayload.eventId !== "string") return;
+  if (p2pSeenEventIds.has(eventPayload.eventId)) return;
+
+  const remoteTs = Number(eventPayload.ts) || Date.now();
+  const knownTs = p2pLastTimestampByPdf.get(eventPayload.pdf) || 0;
+  if (remoteTs < knownTs) return;
+
+  markSeenP2PEvent(eventPayload.eventId);
+  p2pLastTimestampByPdf.set(eventPayload.pdf, remoteTs);
+
+  const next = normalizeAnnotationState(eventPayload.state);
+  const existing = pdfState.get(eventPayload.pdf) || {};
+  pdfState.set(eventPayload.pdf, {
+    ...existing,
+    annotations: next.annotations,
+    textItems: next.textItems,
+    arrows: next.arrows,
+  });
+  saveLocalAnnotationState(eventPayload.pdf, next);
+
+  if (eventPayload.pdf === currentPdfKey) {
+    loadStateForPdf(currentPdfKey);
+    rebuildHeatmapBase();
+    renderHeatmap();
+  }
+}
+
+function setupP2PAnnotationSync() {
+  if (!p2pBridge || typeof p2pBridge.onAnnotationEvent !== "function") {
+    return;
+  }
+  try {
+    if (typeof p2pBridge.getState === "function") {
+      void p2pBridge.getState();
+    }
+    const unsubscribe = p2pBridge.onAnnotationEvent((eventPayload) => {
+      applyP2PAnnotationState(eventPayload);
+    });
+    window.addEventListener("beforeunload", () => {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+    }, { once: true });
   } catch (err) {
     console.error(err);
   }
@@ -2978,7 +3092,7 @@ async function loadAnnotationsForPdf(pdfName) {
   renderHeatmap();
 }
 
-async function saveAnnotationsForPdf() {
+async function saveAnnotationsForPdf({ broadcast = true } = {}) {
   if (!currentPdfKey) return;
   if (!isAuthenticated) return;
   serializeCurrentState();
@@ -2996,6 +3110,9 @@ async function saveAnnotationsForPdf() {
   pdfState.set(currentPdfKey, cleanState);
   for (const ann of annotations.values()) {
     ann.isNew = false;
+  }
+  if (broadcast) {
+    void publishP2PAnnotationState(currentPdfKey);
   }
 }
 
@@ -3901,6 +4018,7 @@ if (annotationSortSelect) {
 setActiveTab("notes");
 setViewportTransform();
 loadNotificationCount();
+setupP2PAnnotationSync();
 if (window.DEBUG_MODE) {
   searchInput.value = DEBUG_PDF_NAME;
   searchPdf();

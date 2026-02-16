@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
@@ -48,6 +48,7 @@ let djangoProcess = null;
 let quitting = false;
 let appUrl = `http://${DJANGO_HOST}:${DJANGO_PORT}/`;
 let p2pNode = null;
+let p2pStarted = false;
 
 const LIBP2P_TOPIC = process.env.LIBP2P_TOPIC || "epstein/annotations/v1";
 const LIBP2P_BOOTSTRAP = (process.env.LIBP2P_BOOTSTRAP || "")
@@ -61,6 +62,23 @@ const LIBP2P_LISTEN = (process.env.LIBP2P_LISTEN || "")
 
 function logP2P(message) {
   console.log(`[libp2p] ${message}`);
+}
+
+function p2pStateSnapshot() {
+  return {
+    enabled: Boolean(p2pNode && p2pStarted),
+    peerId: p2pNode?.peerId?.toString?.() || null,
+    topic: LIBP2P_TOPIC,
+    listen: p2pNode ? p2pNode.getMultiaddrs().map((addr) => addr.toString()) : [],
+  };
+}
+
+function broadcastAnnotationEvent(payload) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send("epstein:p2p:annotation-event", payload);
+    }
+  }
 }
 
 function canRun(cmd, args = ["--version"]) {
@@ -227,6 +245,7 @@ async function startP2PNode() {
     });
 
     await p2pNode.start();
+    p2pStarted = true;
     logP2P(`started peerId=${p2pNode.peerId.toString()}`);
     const addresses = p2pNode.getMultiaddrs().map((addr) => addr.toString()).join(", ");
     logP2P(`listen=${addresses || "none"}`);
@@ -238,6 +257,16 @@ async function startP2PNode() {
         const from = event?.detail?.from?.toString?.() || "unknown";
         const size = event?.detail?.data?.length || 0;
         logP2P(`message topic=${LIBP2P_TOPIC} from=${from} bytes=${size}`);
+        try {
+          const raw = event?.detail?.data;
+          if (!raw) return;
+          const parsed = JSON.parse(new TextDecoder().decode(raw));
+          if (parsed && typeof parsed === "object") {
+            broadcastAnnotationEvent(parsed);
+          }
+        } catch (error) {
+          logP2P(`message decode error (${error.message})`);
+        }
       });
     }
 
@@ -247,6 +276,7 @@ async function startP2PNode() {
     });
   } catch (error) {
     // Keep app functional even when p2p dependencies are not available yet.
+    p2pStarted = false;
     logP2P(`disabled (${error.message})`);
   }
 }
@@ -261,6 +291,7 @@ async function stopP2PNode() {
   } catch (error) {
     logP2P(`stop error (${error.message})`);
   } finally {
+    p2pStarted = false;
     p2pNode = null;
   }
 }
@@ -277,11 +308,31 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
   mainWindow.loadURL(appUrl);
 }
+
+ipcMain.handle("epstein:p2p:state", async () => p2pStateSnapshot());
+
+ipcMain.handle("epstein:p2p:publish-annotation-event", async (_event, payload) => {
+  if (!p2pNode || !p2pStarted || !p2pNode.services?.pubsub) {
+    return { ok: false, error: "p2p_unavailable" };
+  }
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, error: "invalid_payload" };
+  }
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    await p2pNode.services.pubsub.publish(LIBP2P_TOPIC, bytes);
+    return { ok: true };
+  } catch (error) {
+    logP2P(`publish error (${error.message})`);
+    return { ok: false, error: "publish_failed" };
+  }
+});
 
 async function bootstrap() {
   try {
