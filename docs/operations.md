@@ -23,6 +23,11 @@
   - Annotation mutation/comment/vote endpoints return `410`.
 - If users report "no annotations visible", confirm whether the client is expected to source them from decentralized sync instead of Django DB.
 
+## Identity Behavior
+- Login/register pages and routes are removed.
+- Each browser/client gets a persistent anonymous user hash via cookie (`epstein_user_hash`).
+- If identity appears reset, check whether cookies were cleared.
+
 ## Static/UI Update Issues
 Symptoms:
 - Users only see new UI after hard refresh.

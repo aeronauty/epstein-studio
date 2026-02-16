@@ -12,8 +12,6 @@ import shutil
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
-from django.contrib.auth import login, logout
-from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Count, Q
@@ -487,58 +485,6 @@ def pdf_votes(request):
     return JsonResponse({"upvotes": upvotes, "downvotes": downvotes, "user_vote": user_vote})
 
 
-def register(request):
-    """Simple username/password registration with auto-login."""
-    def _generate_id():
-        alphabet = "abcdefghijklmnopqrstuvwxyz"
-        return "".join(random.choice(alphabet) for _ in range(5))
-
-    if request.method == "POST":
-        data = request.POST.copy()
-        if not data.get("username"):
-            data["username"] = data.get("suggested_id", "").strip()
-        form = UserCreationForm(data)
-        if form.is_valid():
-            user = form.save()
-            login(request, user)
-            return redirect("start")
-    else:
-        form = UserCreationForm()
-    suggested_id = None
-    for _ in range(10):
-        candidate = _generate_id()
-        if not User.objects.filter(username__iexact=candidate).exists():
-            suggested_id = candidate
-            break
-    if suggested_id is None:
-        suggested_id = _generate_id()
-    current_username = ""
-    try:
-        current_username = form.data.get("username", "")
-    except Exception:
-        current_username = ""
-    return render(
-        request,
-        "epstein_ui/register.html",
-        {"form": form, "suggested_id": suggested_id, "current_username": current_username},
-    )
-
-
-def logout_view(request):
-    """Logout helper that redirects back to the index."""
-    logout(request)
-    return redirect("start")
-
-
-def username_check(request):
-    """Return whether a username is available."""
-    username = (request.GET.get("u") or "").strip()
-    if not username:
-        return JsonResponse({"available": False})
-    exists = User.objects.filter(username__iexact=username).exists()
-    return JsonResponse({"available": not exists})
-
-
 @csrf_exempt
 def annotations_api(request):
     if request.method == "GET":
@@ -805,7 +751,7 @@ def notifications_summary(request):
 
 def notifications_view(request):
     if not request.user.is_authenticated:
-        return redirect("login")
+        return redirect("start")
     notifications = (
         Notification.objects.filter(user=request.user)
         .select_related("pdf_comment", "pdf_comment_reply")

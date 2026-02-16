@@ -6,6 +6,9 @@
 - Main Django entry point: `backend/manage.py`.
 - Main app: `backend/apps/epstein_ui`.
 - Electron desktop shell entry point: `electron/main.js`.
+- User identity:
+  - No login/register flow.
+  - Middleware creates a persistent anonymous hash (`epstein_user_hash` cookie) and uses it as `request.user.username`.
 
 ## Local Setup
 1. Install dependencies:
@@ -28,6 +31,8 @@
   - `GET /annotations/?pdf=<filename.pdf>` returns an empty `annotations` list by design while decentralization work is in progress.
 - Annotation write/comment/vote endpoint behavior:
   - `POST /annotations/`, `POST /annotation-votes/`, `GET|POST /annotation-comments/`, `POST /comment-votes/`, and `POST /comment-delete/` return `410`.
+- Auth route behavior:
+  - `/login/`, `/register/`, `/logout/`, and `/username-check/` are removed.
 - Run desktop app:
   - `npm install`
   - `npm run electron:dev`

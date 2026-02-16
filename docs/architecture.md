@@ -15,6 +15,8 @@
   - Uses the default native OS title bar with standard window controls.
 - API-like endpoints:
   - Implemented in `backend/apps/epstein_ui/views.py`.
+- Identity middleware:
+  - `PersistentUserHashMiddleware` auto-creates and logs in an anonymous user hash stored in a persistent cookie.
 - Routing:
   - `backend/apps/epstein_ui/urls.py`.
 - Data models:
