@@ -1,0 +1,43 @@
+# Architecture Overview
+
+## High-Level
+- Django monolith with server-rendered templates.
+- Interactive behavior implemented with static JS files.
+- PDF metadata and collaboration data in SQL database.
+
+## Main Components
+- Web app:
+  - Templates and static assets under `backend/apps/epstein_ui/`.
+- API-like endpoints:
+  - Implemented in `backend/apps/epstein_ui/views.py`.
+- Routing:
+  - `backend/apps/epstein_ui/urls.py`.
+- Data models:
+  - `backend/apps/epstein_ui/models.py`.
+
+## Core Data Domains
+- PDF index (`PdfDocument`):
+  - Filename/path metadata
+  - Aggregate counters (`annotation_count`, `vote_score`)
+- Annotation system:
+  - `Annotation`, `TextItem`, `ArrowItem`
+  - Votes and threaded comments
+- PDF-level discussion:
+  - `PdfComment`, `PdfCommentReply`, votes
+- Notifications:
+  - Notification records for replies/interactions
+
+## Frontend Structure
+- Main canvas experience:
+  - Template: `templates/epstein_ui/index.html`
+  - JS: `static/epstein_ui/app.js`
+- Browse view:
+  - Template: `templates/epstein_ui/browse.html`
+  - JS: `static/epstein_ui/browse.js`
+- Shared styles:
+  - `static/epstein_ui/style.css`
+
+## PDF Indexing and Counters
+- Index refresh command:
+  - `uv run python backend/manage.py index_pdfs`
+- Counts are maintained both by command refresh and event-driven updates (signals/views), depending on flow.
