@@ -165,6 +165,14 @@ def _render_pdf_pages(pdf_path: Path) -> list[Path]:
     return rendered
 
 
+def disclaimer(request):
+    """Show the disclaimer gate; record acceptance in the session."""
+    if request.method == "POST":
+        request.session["disclaimer_accepted"] = True
+        return redirect("start")
+    return render(request, "epstein_ui/disclaimer.html")
+
+
 def start_page(request):
     """Render the landing page with project stats."""
     try:
