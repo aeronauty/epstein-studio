@@ -45,7 +45,13 @@
   - `nvm use 20.19.0`
   - `npm install`
   - `npm run electron:dev`
+  - Multi-peer debug mode: `ELECTRON_DEBUG_MULTI=1 npm run electron:dev`
+    - Starts a second Electron process with separate `userData` (`peer-2`) so both windows can run simultaneously.
+    - Peer 2 uses the same Django URL and libp2p topic for local annotation sync verification.
+    - Bootstrap dialing is auto-wired from peer 1 listen addresses (normalized to dialable localhost + `/p2p/<peerId>`).
+    - Startup logs include explicit discovery dial attempts by peer id (`dial ok peer=...` / `dial failed peer=...`) for easier connectivity debugging.
   - On startup, Electron attempts to boot a libp2p node and logs status with `[libp2p] ...` lines.
+  - Current runtime mesh uses gossipsub + identify + bootstrap discovery (DHT is not required for local peer test mode).
   - Optional libp2p overrides:
     - `LIBP2P_BOOTSTRAP` (comma-separated multiaddrs)
     - `LIBP2P_LISTEN` (comma-separated listen multiaddrs)

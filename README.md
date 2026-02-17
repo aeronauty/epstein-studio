@@ -137,6 +137,10 @@ Close the Electron window. The spawned Django server is stopped on app exit.
   - `LIBP2P_BOOTSTRAP` (comma-separated peer multiaddrs)
   - `LIBP2P_LISTEN` (comma-separated listen multiaddrs)
   - `LIBP2P_TOPIC` (default: `epstein/annotations/v1`)
+- Debug multi-peer mode:
+  - `ELECTRON_DEBUG_MULTI=1 npm run electron:dev`
+  - Launches a second Electron instance (`Epstein Studio (Peer 2)`) with isolated local profile storage.
+  - Peer 2 joins the same libp2p topic and bootstraps to the first window for local sync testing.
 - Linux/Ubuntu: the launcher defaults to `ozone-platform-hint=x11` so native title bar buttons and window drag work reliably.
 
 Example overrides:

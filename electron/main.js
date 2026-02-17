@@ -43,12 +43,18 @@ const DJANGO_PORT = Number.parseInt(process.env.ELECTRON_DJANGO_PORT || "8000", 
 const SERVER_WAIT_TIMEOUT_MS = 30_000;
 const SERVER_RETRY_INTERVAL_MS = 250;
 const PORT_SCAN_LIMIT = 50;
+const DEBUG_MULTI_PEER = process.env.ELECTRON_DEBUG_MULTI === "1";
+const DEBUG_CHILD = process.env.ELECTRON_DEBUG_CHILD === "1";
+const FORCED_APP_URL = process.env.ELECTRON_APP_URL || "";
+const USER_DATA_SUFFIX = process.env.ELECTRON_USER_DATA_SUFFIX || "";
 
 let djangoProcess = null;
 let quitting = false;
 let appUrl = `http://${DJANGO_HOST}:${DJANGO_PORT}/`;
 let p2pNode = null;
 let p2pStarted = false;
+let debugPeerProcess = null;
+const p2pDialedPeers = new Set();
 
 const LIBP2P_TOPIC = process.env.LIBP2P_TOPIC || "epstein/annotations/v1";
 const LIBP2P_BOOTSTRAP = (process.env.LIBP2P_BOOTSTRAP || "")
@@ -59,6 +65,10 @@ const LIBP2P_LISTEN = (process.env.LIBP2P_LISTEN || "")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+
+if (USER_DATA_SUFFIX) {
+  app.setPath("userData", `${app.getPath("userData")}-${USER_DATA_SUFFIX}`);
+}
 
 function logP2P(message) {
   console.log(`[libp2p] ${message}`);
@@ -71,6 +81,30 @@ function p2pStateSnapshot() {
     topic: LIBP2P_TOPIC,
     listen: p2pNode ? p2pNode.getMultiaddrs().map((addr) => addr.toString()) : [],
   };
+}
+
+function libp2pBootstrapAddrs() {
+  if (!p2pNode) {
+    return [];
+  }
+  const peerId = p2pNode.peerId?.toString?.() || "";
+  if (!peerId) {
+    return [];
+  }
+  return p2pNode.getMultiaddrs()
+    .map((addr) => addr.toString())
+    .map((addr) => {
+      let normalized = addr;
+      // 0.0.0.0 is not dialable for local child process bootstrap.
+      if (normalized.startsWith("/ip4/0.0.0.0/")) {
+        normalized = normalized.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/");
+      }
+      if (!normalized.includes("/p2p/")) {
+        normalized = `${normalized}/p2p/${peerId}`;
+      }
+      return normalized;
+    })
+    .filter(Boolean);
 }
 
 function broadcastAnnotationEvent(payload) {
@@ -211,7 +245,9 @@ function stopDjangoServer() {
 }
 
 async function startP2PNode() {
+  logP2P("init start");
   if (p2pNode) {
+    logP2P("init skipped (already started)");
     return;
   }
   try {
@@ -222,7 +258,6 @@ async function startP2PNode() {
     const webSocketsPkg = await import("@libp2p/websockets");
     const bootstrapPkg = await import("@libp2p/bootstrap");
     const identifyPkg = await import("@libp2p/identify");
-    const dhtPkg = await import("@libp2p/kad-dht");
 
     const listen = LIBP2P_LISTEN.length > 0
       ? LIBP2P_LISTEN
@@ -231,15 +266,18 @@ async function startP2PNode() {
     if (LIBP2P_BOOTSTRAP.length > 0) {
       peerDiscovery.push(bootstrapPkg.bootstrap({ list: LIBP2P_BOOTSTRAP }));
     }
+    logP2P(`mode=${DEBUG_CHILD ? "child" : "primary"} topic=${LIBP2P_TOPIC}`);
+    if (LIBP2P_BOOTSTRAP.length > 0) {
+      logP2P(`bootstrap=${LIBP2P_BOOTSTRAP.join(", ")}`);
+    }
 
     p2pNode = await libp2pPkg.createLibp2p({
       addresses: { listen },
       transports: [tcpPkg.tcp(), webSocketsPkg.webSockets()],
-      connectionEncryption: [noisePkg.noise()],
+      connectionEncrypters: [noisePkg.noise()],
       peerDiscovery,
       services: {
         identify: identifyPkg.identify(),
-        dht: dhtPkg.kadDHT(),
         pubsub: gossipsubPkg.gossipsub({ allowPublishToZeroTopicPeers: true }),
       },
     });
@@ -270,10 +308,29 @@ async function startP2PNode() {
       });
     }
 
-    p2pNode.addEventListener("peer:discovery", (event) => {
-      const id = event?.detail?.id?.toString?.() || "unknown";
+    p2pNode.addEventListener("peer:discovery", async (event) => {
+      const peerId = event?.detail?.id;
+      const id = peerId?.toString?.() || "unknown";
       logP2P(`discovered peer=${id}`);
+      if (!peerId || p2pDialedPeers.has(id)) {
+        return;
+      }
+      p2pDialedPeers.add(id);
+      try {
+        await p2pNode.dial(peerId);
+        logP2P(`dial ok peer=${id}`);
+      } catch (error) {
+        logP2P(`dial failed peer=${id} (${error.message})`);
+      }
     });
+    p2pNode.addEventListener("peer:connect", (event) => {
+      const id = event?.detail?.toString?.() || event?.detail?.remotePeer?.toString?.() || "unknown";
+      logP2P(`connected peer=${id}`);
+    });
+
+    if (LIBP2P_BOOTSTRAP.length > 0) {
+      logP2P("awaiting peer discovery for explicit peer dial");
+    }
   } catch (error) {
     // Keep app functional even when p2p dependencies are not available yet.
     p2pStarted = false;
@@ -298,7 +355,7 @@ async function stopP2PNode() {
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
-    title: "Epstein Studio",
+    title: DEBUG_CHILD ? "Epstein Studio (Peer 2)" : "Epstein Studio",
     width: 1600,
     height: 980,
     minWidth: 1200,
@@ -313,6 +370,43 @@ function createWindow() {
   });
 
   mainWindow.loadURL(appUrl);
+}
+
+function startDebugPeer() {
+  if (!DEBUG_MULTI_PEER || DEBUG_CHILD || debugPeerProcess) {
+    return;
+  }
+  const entryArgs = process.argv.slice(1);
+  if (entryArgs.length === 0) {
+    logP2P("debug peer skipped (missing electron entrypoint args)");
+    return;
+  }
+  const bootstrapAddrs = libp2pBootstrapAddrs();
+  const env = {
+    ...process.env,
+    ELECTRON_DEBUG_MULTI: "0",
+    ELECTRON_DEBUG_CHILD: "1",
+    ELECTRON_USER_DATA_SUFFIX: "peer-2",
+    ELECTRON_APP_URL: appUrl,
+  };
+  if (bootstrapAddrs.length > 0) {
+    env.LIBP2P_BOOTSTRAP = bootstrapAddrs.join(",");
+  }
+  debugPeerProcess = spawn(process.execPath, entryArgs, {
+    stdio: "inherit",
+    env,
+  });
+  debugPeerProcess.on("exit", () => {
+    debugPeerProcess = null;
+  });
+}
+
+function stopDebugPeer() {
+  if (!debugPeerProcess) {
+    return;
+  }
+  debugPeerProcess.kill("SIGTERM");
+  debugPeerProcess = null;
 }
 
 ipcMain.handle("epstein:p2p:state", async () => p2pStateSnapshot());
@@ -336,13 +430,22 @@ ipcMain.handle("epstein:p2p:publish-annotation-event", async (_event, payload) =
 
 async function bootstrap() {
   try {
+    logP2P("bootstrap begin");
     await startP2PNode();
+
+    if (FORCED_APP_URL) {
+      appUrl = FORCED_APP_URL;
+      createWindow();
+      startDebugPeer();
+      return;
+    }
 
     const configuredUrl = buildUrl(DJANGO_PORT);
     const existingAppOnConfiguredPort = await looksLikeEpsteinStudio(configuredUrl);
     if (existingAppOnConfiguredPort) {
       appUrl = configuredUrl;
       createWindow();
+      startDebugPeer();
       return;
     }
 
@@ -354,6 +457,7 @@ async function bootstrap() {
     await startDjangoServer(portToUse);
     appUrl = buildUrl(portToUse);
     createWindow();
+    startDebugPeer();
   } catch (error) {
     dialog.showErrorBox(
       "Epstein Studio",
@@ -373,6 +477,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   quitting = true;
+  stopDebugPeer();
   void stopP2PNode();
   stopDjangoServer();
 });
