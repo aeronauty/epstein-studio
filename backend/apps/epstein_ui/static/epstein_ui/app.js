@@ -281,7 +281,10 @@ async function publishP2PAnnotationState(pdfName) {
   };
   markSeenP2PEvent(payload.eventId);
   try {
-    await p2pBridge.publishAnnotationEvent(payload);
+    const result = await p2pBridge.publishAnnotationEvent(payload);
+    if (!result || result.ok !== true) {
+      console.warn("P2P publish rejected", result);
+    }
   } catch (err) {
     console.error(err);
   }

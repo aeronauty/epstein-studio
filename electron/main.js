@@ -57,6 +57,7 @@ let debugPeerProcess = null;
 const p2pDialedPeers = new Set();
 
 const LIBP2P_TOPIC = process.env.LIBP2P_TOPIC || "epstein/annotations/v1";
+const LIBP2P_ANN_STREAM_PROTOCOL = "/epstein/annotations/1.0.0";
 const LIBP2P_BOOTSTRAP = (process.env.LIBP2P_BOOTSTRAP || "")
   .split(",")
   .map((value) => value.trim())
@@ -108,9 +109,92 @@ function libp2pBootstrapAddrs() {
 }
 
 function broadcastAnnotationEvent(payload) {
-  for (const window of BrowserWindow.getAllWindows()) {
+  const windows = BrowserWindow.getAllWindows();
+  const kind = payload?.kind || "unknown";
+  const pdf = payload?.pdf || "n/a";
+  logP2P(`broadcast kind=${kind} pdf=${pdf} windows=${windows.length}`);
+  for (const window of windows) {
     if (!window.isDestroyed()) {
       window.webContents.send("epstein:p2p:annotation-event", payload);
+    }
+  }
+}
+
+function relayToLocalWindows(payload, sourceWebContentsId = null) {
+  const windows = BrowserWindow.getAllWindows();
+  let relayed = 0;
+  for (const window of windows) {
+    if (window.isDestroyed()) {
+      continue;
+    }
+    if (sourceWebContentsId != null && window.webContents.id === sourceWebContentsId) {
+      continue;
+    }
+    window.webContents.send("epstein:p2p:annotation-event", payload);
+    relayed += 1;
+  }
+  if (relayed > 0) {
+    const kind = payload?.kind || "unknown";
+    const pdf = payload?.pdf || "n/a";
+    logP2P(`relay local kind=${kind} pdf=${pdf} targets=${relayed}`);
+  }
+}
+
+function relayToDebugPeerProcess(payload) {
+  if (!debugPeerProcess || !DEBUG_MULTI_PEER) {
+    return;
+  }
+  if (!debugPeerProcess.connected) {
+    return;
+  }
+  try {
+    debugPeerProcess.send({ type: "annotation-event", payload });
+    const kind = payload?.kind || "unknown";
+    const pdf = payload?.pdf || "n/a";
+    logP2P(`relay debug child kind=${kind} pdf=${pdf}`);
+  } catch (error) {
+    logP2P(`relay debug child failed (${error.message})`);
+  }
+}
+
+function decodeChunkToString(chunk) {
+  if (!chunk) return "";
+  if (typeof chunk === "string") return chunk;
+  if (chunk instanceof Uint8Array) {
+    return new TextDecoder().decode(chunk);
+  }
+  if (typeof chunk.subarray === "function") {
+    try {
+      return new TextDecoder().decode(chunk.subarray());
+    } catch (_error) {
+      return "";
+    }
+  }
+  return "";
+}
+
+async function publishViaDirectPeerStreams(payload) {
+  if (!p2pNode) {
+    return;
+  }
+  const peers = typeof p2pNode.getPeers === "function" ? p2pNode.getPeers() : [];
+  if (!Array.isArray(peers) || peers.length === 0) {
+    logP2P("direct stream skipped (no connected peers)");
+    return;
+  }
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  for (const peerId of peers) {
+    const peer = peerId?.toString?.() || "unknown";
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const stream = await p2pNode.dialProtocol(peerId, LIBP2P_ANN_STREAM_PROTOCOL);
+      // eslint-disable-next-line no-await-in-loop
+      await stream.sink((async function* writeOnce() {
+        yield bytes;
+      }()));
+      logP2P(`direct send ok peer=${peer} bytes=${bytes.length}`);
+    } catch (error) {
+      logP2P(`direct send failed peer=${peer} (${error.message})`);
     }
   }
 }
@@ -308,6 +392,26 @@ async function startP2PNode() {
       });
     }
 
+    p2pNode.handle(LIBP2P_ANN_STREAM_PROTOCOL, async ({ stream, connection }) => {
+      const remote = connection?.remotePeer?.toString?.() || "unknown";
+      try {
+        for await (const chunk of stream.source) {
+          const text = decodeChunkToString(chunk);
+          if (!text) {
+            continue;
+          }
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === "object") {
+            logP2P(`direct recv peer=${remote}`);
+            broadcastAnnotationEvent(parsed);
+          }
+        }
+      } catch (error) {
+        logP2P(`direct recv error peer=${remote} (${error.message})`);
+      }
+    });
+    logP2P(`direct protocol ready ${LIBP2P_ANN_STREAM_PROTOCOL}`);
+
     p2pNode.addEventListener("peer:discovery", async (event) => {
       const peerId = event?.detail?.id;
       const id = peerId?.toString?.() || "unknown";
@@ -393,8 +497,18 @@ function startDebugPeer() {
     env.LIBP2P_BOOTSTRAP = bootstrapAddrs.join(",");
   }
   debugPeerProcess = spawn(process.execPath, entryArgs, {
-    stdio: "inherit",
+    stdio: ["inherit", "inherit", "inherit", "ipc"],
     env,
+  });
+  debugPeerProcess.on("message", (message) => {
+    if (!message || message.type !== "annotation-event") {
+      return;
+    }
+    const payload = message.payload;
+    const kind = payload?.kind || "unknown";
+    const pdf = payload?.pdf || "n/a";
+    logP2P(`relay from debug child kind=${kind} pdf=${pdf}`);
+    broadcastAnnotationEvent(payload);
   });
   debugPeerProcess.on("exit", () => {
     debugPeerProcess = null;
@@ -412,21 +526,52 @@ function stopDebugPeer() {
 ipcMain.handle("epstein:p2p:state", async () => p2pStateSnapshot());
 
 ipcMain.handle("epstein:p2p:publish-annotation-event", async (_event, payload) => {
+  const kind = payload?.kind || "unknown";
+  const pdf = payload?.pdf || "n/a";
+  logP2P(`publish request kind=${kind} pdf=${pdf}`);
   if (!p2pNode || !p2pStarted || !p2pNode.services?.pubsub) {
+    logP2P("publish rejected (p2p unavailable)");
     return { ok: false, error: "p2p_unavailable" };
   }
   if (!payload || typeof payload !== "object") {
+    logP2P("publish rejected (invalid payload)");
     return { ok: false, error: "invalid_payload" };
   }
   try {
+    const subscribers = p2pNode.services.pubsub.getSubscribers(LIBP2P_TOPIC);
+    logP2P(`publish peers topic=${LIBP2P_TOPIC} subscribers=${subscribers.length}`);
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
     await p2pNode.services.pubsub.publish(LIBP2P_TOPIC, bytes);
+    logP2P(`publish ok topic=${LIBP2P_TOPIC} bytes=${bytes.length}`);
+    if (subscribers.length === 0) {
+      await publishViaDirectPeerStreams(payload);
+    }
+    // Local debug helper: mirror events between app windows even if gossipsub delivery lags.
+    relayToLocalWindows(payload, _event?.sender?.id ?? null);
+    relayToDebugPeerProcess(payload);
+    if (DEBUG_CHILD && typeof process.send === "function") {
+      process.send({ type: "annotation-event", payload });
+      logP2P("relay debug parent");
+    }
     return { ok: true };
   } catch (error) {
     logP2P(`publish error (${error.message})`);
     return { ok: false, error: "publish_failed" };
   }
 });
+
+if (DEBUG_CHILD) {
+  process.on("message", (message) => {
+    if (!message || message.type !== "annotation-event") {
+      return;
+    }
+    const payload = message.payload;
+    const kind = payload?.kind || "unknown";
+    const pdf = payload?.pdf || "n/a";
+    logP2P(`relay from debug parent kind=${kind} pdf=${pdf}`);
+    broadcastAnnotationEvent(payload);
+  });
+}
 
 async function bootstrap() {
   try {

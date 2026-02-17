@@ -52,6 +52,8 @@
     - Startup logs include explicit discovery dial attempts by peer id (`dial ok peer=...` / `dial failed peer=...`) for easier connectivity debugging.
   - On startup, Electron attempts to boot a libp2p node and logs status with `[libp2p] ...` lines.
   - Current runtime mesh uses gossipsub + identify + bootstrap discovery (DHT is not required for local peer test mode).
+  - Publish/apply traces include `publish request`, `publish peers`, `publish ok`, `message topic`, `direct send ok`, `direct recv`, and `broadcast kind=...` lines.
+  - In local multi-window Electron runs, published annotation events are also relayed across the parent/child Electron processes via debug IPC fallback for immediate sync verification.
   - Optional libp2p overrides:
     - `LIBP2P_BOOTSTRAP` (comma-separated multiaddrs)
     - `LIBP2P_LISTEN` (comma-separated listen multiaddrs)
