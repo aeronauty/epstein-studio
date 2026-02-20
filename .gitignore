@@ -1,14 +1,65 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environments
 .venv/
 venv/
+.python-version
+
+# Testing / linting
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Django
 backend/media/
 backend/db.sqlite3
-results/
+backend/static/
+backend/staticfiles/
+*.pot
+
+# Bulk data / binaries
+data-set-*/
 data/
-*.log
-.DS_Store
+results/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.webp
+*.sqlite
+
+# Tool-generated output
+tools/*/output/
+
+# Environment
 .env
+.env.*
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
