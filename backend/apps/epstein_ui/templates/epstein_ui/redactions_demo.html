@@ -1,0 +1,98 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redaction Demo - Epstein Studio</title>
+    <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=3" />
+  </head>
+  <body>
+    <div class="page rd-page">
+      <header class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-left">
+            <a href="/" class="brand">Epstein Studio</a>
+          </div>
+          <div class="topbar-actions">
+            <a class="btn btn-secondary" href="/about/">About</a>
+            <a class="btn btn-secondary" href="/browse/">Browse</a>
+            <a class="btn btn-secondary active" href="/redactions-demo/">Redactions</a>
+          </div>
+        </div>
+      </header>
+
+      <main class="rd-layout">
+        <div class="rd-header">
+          <div>
+            <div class="file-title">
+              Redaction Demo <span id="rdCount" class="browse-count">({{ total_redactions }})</span>
+            </div>
+          </div>
+          <div class="rd-controls">
+            <div class="search-wrap">
+              <input id="rdSearch" type="text" placeholder="Search context text..." />
+              <button id="rdSearchBtn" class="btn browse-search-btn" type="button">Search</button>
+            </div>
+            <select id="rdSort" class="btn btn-secondary" aria-label="Sort">
+              <option value="estimated_chars" selected>Most Characters</option>
+              <option value="estimated_chars_asc">Fewest Characters</option>
+              <option value="confidence">Highest Confidence</option>
+              <option value="doc">Document</option>
+              <option value="page">Page Number</option>
+              <option value="detection_method">Detection Method</option>
+            </select>
+            <select id="rdMethod" class="btn btn-secondary" aria-label="Detection Method">
+              <option value="">All Methods</option>
+              <option value="pymupdf">PyMuPDF</option>
+              <option value="opencv">OpenCV</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="rdGrid" class="rd-grid"></div>
+
+        <div class="browse-actions">
+          <button id="rdMore" class="btn btn-secondary" type="button">Load More</button>
+        </div>
+      </main>
+
+      <!-- Detail overlay -->
+      <div id="rdOverlay" class="rd-overlay hidden">
+        <div class="rd-detail">
+          <div class="rd-detail-header">
+            <h2 id="rdDetailTitle" class="rd-detail-title"></h2>
+            <button id="rdDetailClose" class="btn btn-secondary rd-close-btn" type="button">Close</button>
+          </div>
+          <div class="rd-detail-body">
+            <div class="rd-zoom-bar">
+              <button id="rdZoomTight" class="btn btn-secondary" type="button">Tight</button>
+              <button id="rdZoomContext" class="btn btn-secondary active" type="button">Context</button>
+              <button id="rdZoomPage" class="btn btn-secondary" type="button">Page</button>
+            </div>
+            <div id="rdViewer" class="rd-viewer">
+              <div id="rdViewerInner" class="rd-viewer-inner">
+                <img id="rdPageImg" alt="PDF page" />
+                <div id="rdBox" class="rd-redaction-box"></div>
+              </div>
+            </div>
+            <div class="rd-detail-info">
+              <div class="rd-detail-section">
+                <div class="rd-detail-label">Text Before</div>
+                <div id="rdDetailBefore" class="rd-detail-text"></div>
+              </div>
+              <div class="rd-detail-section">
+                <div class="rd-detail-label">Text After</div>
+                <div id="rdDetailAfter" class="rd-detail-text"></div>
+              </div>
+              <div class="rd-detail-meta" id="rdDetailMeta"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=2"></script>
+  </body>
+</html>

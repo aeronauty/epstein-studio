@@ -28,6 +28,11 @@ urlpatterns = [
     path("notifications-count/", views.notifications_summary, name="notifications_summary"),
     path("notifications/", views.notifications_view, name="notifications_view"),
     path("notifications-read/", views.notifications_mark_read, name="notifications_read"),
+    path("redactions-demo/", views.redactions_demo, name="redactions_demo"),
+    path("redactions-list/", views.redactions_list, name="redactions_list"),
+    path("redactions/<int:pk>/", views.redaction_detail, name="redaction_detail"),
+    path("redactions/<int:pk>/page-image/", views.redaction_page_image, name="redaction_page_image"),
+    path("redactions-image/<path:filepath>", views.redaction_image, name="redaction_image"),
     path("<slug:pdf_slug>/<uuid:target_hash>/", views.index, name="index_pdf_comment"),
     re_path(r"^(?P<pdf_slug>[A-Za-z0-9_-]+)$", views.index, name="index_pdf"),
 ]
