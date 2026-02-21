@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Redaction Demo - Epstein Studio</title>
     <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
-    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=3" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=7" />
   </head>
   <body>
     <div class="page rd-page">
@@ -16,8 +16,6 @@
             <a href="/" class="brand">Epstein Studio</a>
           </div>
           <div class="topbar-actions">
-            <a class="btn btn-secondary" href="/about/">About</a>
-            <a class="btn btn-secondary" href="/browse/">Browse</a>
             <a class="btn btn-secondary active" href="/redactions-demo/">Redactions</a>
           </div>
         </div>
@@ -71,6 +69,20 @@
               <button id="rdZoomTight" class="btn btn-secondary" type="button">Tight</button>
               <button id="rdZoomContext" class="btn btn-secondary active" type="button">Context</button>
               <button id="rdZoomPage" class="btn btn-secondary" type="button">Page</button>
+              <span class="rd-zoom-sep"></span>
+              <label class="rd-zoom-slider-wrap">
+                <span class="rd-zoom-slider-label">Zoom</span>
+                <input id="rdZoomSlider" type="range" min="10" max="500" value="100" />
+                <span id="rdZoomLevel">100%</span>
+              </label>
+              <span class="rd-zoom-sep"></span>
+              <button id="rdFontAnalyze" class="btn btn-secondary" type="button">Analyze Font</button>
+              <label id="rdFontOpacityWrap" class="rd-opacity-wrap hidden">
+                <span class="rd-opacity-label">Opacity</span>
+                <input id="rdFontOpacity" type="range" min="0" max="1" step="0.05" value="0.55" />
+              </label>
+              <span class="rd-zoom-sep"></span>
+              <button id="rdIdentifyFont" class="btn btn-secondary" type="button">Identify Font</button>
             </div>
             <div id="rdViewer" class="rd-viewer">
               <div id="rdViewerInner" class="rd-viewer-inner">
@@ -78,6 +90,9 @@
                 <div id="rdBox" class="rd-redaction-box"></div>
               </div>
             </div>
+            <div id="rdFontSummary" class="rd-font-summary hidden"></div>
+            <div id="rdOptProgress" class="rd-opt-progress hidden"></div>
+            <div id="rdOptResults" class="rd-opt-results hidden"></div>
             <div class="rd-detail-info">
               <div class="rd-detail-section">
                 <div class="rd-detail-label">Text Before</div>
@@ -93,6 +108,6 @@
         </div>
       </div>
     </div>
-    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=2"></script>
+    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=9"></script>
   </body>
 </html>
