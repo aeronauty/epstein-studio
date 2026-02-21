@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Redaction Demo - Epstein Studio</title>
     <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
-    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=2" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=3" />
   </head>
   <body>
     <div class="page rd-page">
@@ -67,14 +67,15 @@
             <button id="rdDetailClose" class="btn btn-secondary rd-close-btn" type="button">Close</button>
           </div>
           <div class="rd-detail-body">
-            <div class="rd-detail-images">
-              <div class="rd-detail-img-wrap">
-                <div class="rd-detail-img-label">Context</div>
-                <img id="rdDetailCtx" alt="Context crop" />
-              </div>
-              <div class="rd-detail-img-wrap">
-                <div class="rd-detail-img-label">Tight</div>
-                <img id="rdDetailTight" alt="Tight crop" />
+            <div class="rd-zoom-bar">
+              <button id="rdZoomTight" class="btn btn-secondary" type="button">Tight</button>
+              <button id="rdZoomContext" class="btn btn-secondary active" type="button">Context</button>
+              <button id="rdZoomPage" class="btn btn-secondary" type="button">Page</button>
+            </div>
+            <div id="rdViewer" class="rd-viewer">
+              <div id="rdViewerInner" class="rd-viewer-inner">
+                <img id="rdPageImg" alt="PDF page" />
+                <div id="rdBox" class="rd-redaction-box"></div>
               </div>
             </div>
             <div class="rd-detail-info">
@@ -92,6 +93,6 @@
         </div>
       </div>
     </div>
-    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=1"></script>
+    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=2"></script>
   </body>
 </html>

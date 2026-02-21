@@ -253,7 +253,11 @@ def extract_pdf_redactions(
     # Extract from drawings
     detections.extend(extract_from_drawings(page, min_aspect_ratio))
     
-    # Extract from text backgrounds (lower confidence)
-    detections.extend(extract_from_text_backgrounds(page))
+    # NOTE: extract_from_text_backgrounds() is intentionally disabled.
+    # It only checks foreground text color (dark = potential redaction) but
+    # PyMuPDF's text dict does not expose per-span background color, so it
+    # cannot distinguish normal black text from black-on-black hidden text.
+    # This produced 100% false positives (every word on the page).
+    # Pixel-level detection via OpenCV already covers this case correctly.
     
     return detections

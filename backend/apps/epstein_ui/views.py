@@ -1305,12 +1305,17 @@ def redaction_detail(request, pk):
     doc = r.extracted_document
     run = doc.extraction_run
 
+    dpi = 150
+    if isinstance(run.parameters, dict):
+        dpi = run.parameters.get("dpi", 150)
+
     return JsonResponse({
         "id": r.pk,
         "doc_id": doc.doc_id,
         "file_path": doc.file_path,
         "extraction_run_id": run.pk,
         "run_started_at": run.started_at.isoformat(),
+        "dpi": dpi,
         "page_num": r.page_num,
         "redaction_index": r.redaction_index,
         "bbox_x0_points": r.bbox_x0_points,
@@ -1353,3 +1358,60 @@ def redaction_image(request, filepath):
     if not full_path.is_file():
         raise Http404
     return FileResponse(open(full_path, "rb"), content_type="image/png")
+
+
+def _render_single_page(pdf_path: Path, page_num: int, dpi: int = 150) -> Path:
+    """Render a single PDF page to a cached PNG. page_num is 1-indexed."""
+    import fitz
+
+    media_dir = Path(settings.MEDIA_ROOT)
+    cache_dir = media_dir / "pdf_page_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    digest = hashlib.sha256(str(pdf_path).encode("utf-8")).hexdigest()[:16]
+    cached = cache_dir / f"{digest}_p{page_num}_r{dpi}.png"
+    if cached.is_file():
+        return cached
+
+    doc = fitz.open(str(pdf_path))
+    page_index = page_num - 1
+    if page_index < 0 or page_index >= len(doc):
+        doc.close()
+        raise RuntimeError(f"Page {page_num} out of range (doc has {len(doc)} pages)")
+
+    page = doc[page_index]
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=mat)
+    pix.save(str(cached))
+    doc.close()
+    return cached
+
+
+def redaction_page_image(request, pk):
+    """Render and serve the PDF page containing a given redaction."""
+    try:
+        r = RedactionRecord.objects.select_related(
+            "extracted_document", "extracted_document__extraction_run"
+        ).get(pk=pk)
+    except RedactionRecord.DoesNotExist:
+        raise Http404
+
+    doc = r.extracted_document
+    run = doc.extraction_run
+    pdf_path = Path(doc.file_path)
+    if not pdf_path.is_file():
+        raise Http404
+
+    dpi = 150
+    if isinstance(run.parameters, dict):
+        dpi = run.parameters.get("dpi", 150)
+
+    try:
+        png_path = _render_single_page(pdf_path, r.page_num, dpi)
+    except RuntimeError:
+        raise Http404
+
+    resp = FileResponse(open(png_path, "rb"), content_type="image/png")
+    resp["Cache-Control"] = "public, max-age=86400"
+    return resp

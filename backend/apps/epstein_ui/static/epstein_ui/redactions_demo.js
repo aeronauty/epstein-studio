@@ -8,9 +8,20 @@ const countSpan = document.getElementById("rdCount");
 const overlay = document.getElementById("rdOverlay");
 const closeBtn = document.getElementById("rdDetailClose");
 
+const viewer = document.getElementById("rdViewer");
+const viewerInner = document.getElementById("rdViewerInner");
+const pageImg = document.getElementById("rdPageImg");
+const boxEl = document.getElementById("rdBox");
+const zoomTightBtn = document.getElementById("rdZoomTight");
+const zoomContextBtn = document.getElementById("rdZoomContext");
+const zoomPageBtn = document.getElementById("rdZoomPage");
+
 let page = 1;
 let loading = false;
 let hasMore = true;
+
+let currentBbox = null;
+let currentZoom = "context";
 
 function imgUrl(relPath) {
   if (!relPath) return "";
@@ -108,6 +119,66 @@ function resetAndLoad() {
   loadPage();
 }
 
+// ---------------------------------------------------------------------------
+// Zoom logic
+// ---------------------------------------------------------------------------
+
+function applyZoom(mode) {
+  if (!currentBbox || !pageImg.naturalWidth) return;
+
+  currentZoom = mode;
+  const vw = viewer.clientWidth;
+  const vh = viewer.clientHeight;
+  const iw = pageImg.naturalWidth;
+  const ih = pageImg.naturalHeight;
+
+  const bx = currentBbox.x0;
+  const by = currentBbox.y0;
+  const bw = currentBbox.x1 - currentBbox.x0;
+  const bh = currentBbox.y1 - currentBbox.y0;
+  const bcx = bx + bw / 2;
+  const bcy = by + bh / 2;
+
+  let scale, tx, ty;
+
+  if (mode === "page") {
+    scale = Math.min(vw / iw, vh / ih);
+    tx = (vw - iw * scale) / 2;
+    ty = (vh - ih * scale) / 2;
+  } else {
+    const pad = mode === "tight" ? 40 : 150;
+    const regionW = bw + pad * 2;
+    const regionH = bh + pad * 2;
+    scale = Math.min(vw / regionW, vh / regionH);
+    scale = Math.max(scale, Math.min(vw / iw, vh / ih));
+
+    tx = vw / 2 - bcx * scale;
+    ty = vh / 2 - bcy * scale;
+
+    tx = Math.min(0, Math.max(vw - iw * scale, tx));
+    ty = Math.min(0, Math.max(vh - ih * scale, ty));
+  }
+
+  viewerInner.style.width = iw + "px";
+  viewerInner.style.height = ih + "px";
+  viewerInner.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+
+  boxEl.style.left = bx + "px";
+  boxEl.style.top = by + "px";
+  boxEl.style.width = bw + "px";
+  boxEl.style.height = bh + "px";
+  boxEl.style.display = "block";
+
+  [zoomTightBtn, zoomContextBtn, zoomPageBtn].forEach((b) => b.classList.remove("active"));
+  if (mode === "tight") zoomTightBtn.classList.add("active");
+  else if (mode === "context") zoomContextBtn.classList.add("active");
+  else zoomPageBtn.classList.add("active");
+}
+
+// ---------------------------------------------------------------------------
+// Detail overlay
+// ---------------------------------------------------------------------------
+
 async function openDetail(id) {
   try {
     const resp = await fetch(`/redactions/${id}/`);
@@ -117,12 +188,19 @@ async function openDetail(id) {
     document.getElementById("rdDetailTitle").textContent =
       `${d.doc_id} — Page ${d.page_num}, Redaction #${d.redaction_index}`;
 
-    const ctxImg = document.getElementById("rdDetailCtx");
-    const tightImg = document.getElementById("rdDetailTight");
-    ctxImg.src = d.image_context ? imgUrl(d.image_context) : "";
-    ctxImg.parentElement.classList.toggle("hidden", !d.image_context);
-    tightImg.src = d.image_tight ? imgUrl(d.image_tight) : "";
-    tightImg.parentElement.classList.toggle("hidden", !d.image_tight);
+    currentBbox = {
+      x0: d.bbox_x0_pixels,
+      y0: d.bbox_y0_pixels,
+      x1: d.bbox_x1_pixels,
+      y1: d.bbox_y1_pixels,
+    };
+
+    boxEl.style.display = "none";
+    pageImg.src = "";
+    viewerInner.style.transform = "";
+
+    pageImg.onload = () => applyZoom("context");
+    pageImg.src = `/redactions/${id}/page-image/`;
 
     document.getElementById("rdDetailBefore").textContent = d.text_before || "(none)";
     document.getElementById("rdDetailAfter").textContent = d.text_after || "(none)";
@@ -157,7 +235,13 @@ async function openDetail(id) {
 
 function closeDetail() {
   overlay.classList.add("hidden");
+  pageImg.src = "";
+  boxEl.style.display = "none";
 }
+
+// ---------------------------------------------------------------------------
+// Event listeners
+// ---------------------------------------------------------------------------
 
 if (closeBtn) closeBtn.addEventListener("click", closeDetail);
 if (overlay)
@@ -167,6 +251,10 @@ if (overlay)
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !overlay.classList.contains("hidden")) closeDetail();
 });
+
+if (zoomTightBtn) zoomTightBtn.addEventListener("click", () => applyZoom("tight"));
+if (zoomContextBtn) zoomContextBtn.addEventListener("click", () => applyZoom("context"));
+if (zoomPageBtn) zoomPageBtn.addEventListener("click", () => applyZoom("page"));
 
 if (sortSelect) sortSelect.addEventListener("change", resetAndLoad);
 if (methodSelect) methodSelect.addEventListener("change", resetAndLoad);
