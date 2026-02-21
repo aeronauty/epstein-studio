@@ -22,6 +22,23 @@ let hasMore = true;
 
 let currentBbox = null;
 let currentZoom = "context";
+let currentDetailId = null;
+let fontOverlayActive = false;
+
+let currentScale = 1;
+let currentTx = 0;
+let currentTy = 0;
+
+const fontAnalyzeBtn = document.getElementById("rdFontAnalyze");
+const fontOpacityWrap = document.getElementById("rdFontOpacityWrap");
+const fontOpacityInput = document.getElementById("rdFontOpacity");
+const fontSummaryEl = document.getElementById("rdFontSummary");
+const zoomSlider = document.getElementById("rdZoomSlider");
+const zoomLevelEl = document.getElementById("rdZoomLevel");
+
+let _overlayCanvas = null;
+let _overlayData = null;
+let _overlayOpacity = 0.55;
 
 function imgUrl(relPath) {
   if (!relPath) return "";
@@ -123,10 +140,20 @@ function resetAndLoad() {
 // Zoom logic
 // ---------------------------------------------------------------------------
 
+function setTransform(scale, tx, ty) {
+  currentScale = scale;
+  currentTx = tx;
+  currentTy = ty;
+  viewerInner.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  if (zoomSlider) zoomSlider.value = Math.round(scale * 100);
+  if (zoomLevelEl) zoomLevelEl.textContent = Math.round(scale * 100) + "%";
+}
+
 function applyZoom(mode) {
   if (!currentBbox || !pageImg.naturalWidth) return;
 
   currentZoom = mode;
+  viewerInner.classList.remove("no-transition");
   const vw = viewer.clientWidth;
   const vh = viewer.clientHeight;
   const iw = pageImg.naturalWidth;
@@ -161,7 +188,7 @@ function applyZoom(mode) {
 
   viewerInner.style.width = iw + "px";
   viewerInner.style.height = ih + "px";
-  viewerInner.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  setTransform(scale, tx, ty);
 
   boxEl.style.left = bx + "px";
   boxEl.style.top = by + "px";
@@ -194,6 +221,9 @@ async function openDetail(id) {
       x1: d.bbox_x1_pixels,
       y1: d.bbox_y1_pixels,
     };
+
+    currentDetailId = id;
+    clearFontOverlay();
 
     boxEl.style.display = "none";
     pageImg.src = "";
@@ -237,6 +267,317 @@ function closeDetail() {
   overlay.classList.add("hidden");
   pageImg.src = "";
   boxEl.style.display = "none";
+  clearFontOverlay();
+  currentDetailId = null;
+}
+
+// ---------------------------------------------------------------------------
+// Font analysis overlay (canvas-based for precise baseline alignment)
+// ---------------------------------------------------------------------------
+
+function _getOverlayCanvas() {
+  if (!_overlayCanvas) {
+    _overlayCanvas = document.createElement("canvas");
+    _overlayCanvas.style.position = "absolute";
+    _overlayCanvas.style.left = "0";
+    _overlayCanvas.style.top = "0";
+    _overlayCanvas.style.pointerEvents = "none";
+    viewerInner.appendChild(_overlayCanvas);
+  }
+  if (pageImg.naturalWidth) {
+    _overlayCanvas.width = pageImg.naturalWidth;
+    _overlayCanvas.height = pageImg.naturalHeight;
+    _overlayCanvas.style.width = pageImg.naturalWidth + "px";
+    _overlayCanvas.style.height = pageImg.naturalHeight + "px";
+  }
+  return _overlayCanvas;
+}
+
+function _drawOverlay() {
+  if (!_overlayData) return;
+  const canvas = _getOverlayCanvas();
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const { spans, font_map, params } = _overlayData;
+  ctx.globalAlpha = _overlayOpacity;
+  ctx.fillStyle = "#00cc44";
+  ctx.textBaseline = "alphabetic";
+
+  const scaleX = params?.scale_x ?? 1.0;
+  const wordSp = params?.word_spacing_px ?? 0;
+  const letterSp = params?.letter_spacing_px ?? 0;
+  const xOff = params?.x_offset_px ?? 0;
+  const yOff = params?.y_offset_px ?? 0;
+
+  for (const span of spans) {
+    const fontInfo = font_map ? font_map[span.font_name] : null;
+    const cssFamily = params?.css_family || (fontInfo ? fontInfo.css_family : "serif");
+    const weight = span.font_weight === "bold" ? "bold" : "normal";
+    const style = span.font_style === "italic" ? "italic" : "normal";
+    const fontSize = span.font_size_px * (params?.size_scale ?? 1);
+
+    ctx.font = `${style} ${weight} ${fontSize}px ${cssFamily}`;
+    if (typeof ctx.letterSpacing !== "undefined") ctx.letterSpacing = letterSp + "px";
+    if (typeof ctx.wordSpacing !== "undefined") ctx.wordSpacing = wordSp + "px";
+
+    let x, y;
+    if (span.origin_px) {
+      x = span.origin_px[0] + xOff;
+      y = span.origin_px[1] + yOff;
+    } else {
+      x = span.bbox_px[0] + xOff;
+      y = span.bbox_px[3] + yOff;
+    }
+
+    if (Math.abs(scaleX - 1.0) > 0.001) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scaleX, 1);
+      ctx.fillText(span.text, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText(span.text, x, y);
+    }
+  }
+
+  if (typeof ctx.letterSpacing !== "undefined") ctx.letterSpacing = "0px";
+  if (typeof ctx.wordSpacing !== "undefined") ctx.wordSpacing = "0px";
+}
+
+function clearFontOverlay() {
+  if (_overlayCanvas) {
+    const ctx = _overlayCanvas.getContext("2d");
+    ctx.clearRect(0, 0, _overlayCanvas.width, _overlayCanvas.height);
+  }
+  _overlayData = null;
+  fontOverlayActive = false;
+  if (fontAnalyzeBtn) {
+    fontAnalyzeBtn.textContent = "Analyze Font";
+    fontAnalyzeBtn.classList.remove("active");
+  }
+  if (fontOpacityWrap) fontOpacityWrap.classList.add("hidden");
+  if (fontSummaryEl) {
+    fontSummaryEl.classList.add("hidden");
+    fontSummaryEl.innerHTML = "";
+  }
+  const optResultsEl = document.getElementById("rdOptResults");
+  if (optResultsEl) { optResultsEl.classList.add("hidden"); optResultsEl.innerHTML = ""; }
+  const progressEl = document.getElementById("rdOptProgress");
+  if (progressEl) progressEl.classList.add("hidden");
+  lastOptResults = {};
+}
+
+function renderFontOverlay(data) {
+  clearFontOverlay();
+  _overlayOpacity = fontOpacityInput ? parseFloat(fontOpacityInput.value) : 0.55;
+  _overlayData = { spans: data.spans || [], font_map: data.font_map || {}, params: null };
+  _drawOverlay();
+
+  fontOverlayActive = true;
+  if (fontAnalyzeBtn) {
+    fontAnalyzeBtn.textContent = "Hide Font";
+    fontAnalyzeBtn.classList.add("active");
+  }
+  if (fontOpacityWrap) fontOpacityWrap.classList.remove("hidden");
+
+  if (fontSummaryEl) {
+    const fonts = {};
+    (data.spans || []).forEach((s) => {
+      const key = s.font_name;
+      if (!fonts[key]) {
+        const info = data.font_map[key] || {};
+        fonts[key] = {
+          name: key,
+          css: info.css_family || "serif",
+          confidence: info.confidence || "fallback",
+          size: s.font_size_pt,
+          weight: s.font_weight,
+          style: s.font_style,
+          count: 0,
+        };
+      }
+      fonts[key].count++;
+    });
+    const dominant = Object.values(fonts).sort((a, b) => b.count - a.count)[0];
+
+    const confLabel = { exact: "High", pattern: "Medium", fallback: "Low" };
+    const confClass = { exact: "rd-conf-high", pattern: "rd-conf-med", fallback: "rd-conf-low" };
+
+    const parts = [];
+    if (dominant) {
+      parts.push(
+        `<span class="rd-meta-label">Font</span><span class="rd-meta-value">${dominant.name}</span>`,
+        `<span class="rd-meta-label">CSS Match</span><span class="rd-meta-value">${dominant.css}</span>`,
+        `<span class="rd-meta-label">Certainty</span><span class="rd-meta-value"><span class="${confClass[dominant.confidence] || ""}">${confLabel[dominant.confidence] || dominant.confidence}</span></span>`,
+        `<span class="rd-meta-label">Size</span><span class="rd-meta-value">${dominant.size} pt</span>`,
+        `<span class="rd-meta-label">Weight</span><span class="rd-meta-value">${dominant.weight}</span>`,
+        `<span class="rd-meta-label">Style</span><span class="rd-meta-value">${dominant.style}</span>`
+      );
+    }
+    if (data.line_spacing_px != null)
+      parts.push(`<span class="rd-meta-label">Line spacing</span><span class="rd-meta-value">${data.line_spacing_px} px</span>`);
+    if (data.alignment)
+      parts.push(`<span class="rd-meta-label">Alignment</span><span class="rd-meta-value">${data.alignment}</span>`);
+
+    fontSummaryEl.innerHTML = parts.map((p) => `<div class="rd-meta-row">${p}</div>`).join("");
+    fontSummaryEl.classList.remove("hidden");
+  }
+}
+
+async function analyzeFont(id) {
+  if (fontOverlayActive) {
+    clearFontOverlay();
+    return;
+  }
+  if (fontAnalyzeBtn) {
+    fontAnalyzeBtn.textContent = "Analyzing…";
+    fontAnalyzeBtn.disabled = true;
+  }
+  try {
+    const resp = await fetch(`/redactions/${id}/font-analysis/`);
+    if (!resp.ok) throw new Error("Font analysis failed");
+    const data = await resp.json();
+    lastFontAnalysisData = data;
+    renderFontOverlay(data);
+  } catch (err) {
+    console.error(err);
+    if (fontAnalyzeBtn) fontAnalyzeBtn.textContent = "Analyze Font";
+  } finally {
+    if (fontAnalyzeBtn) fontAnalyzeBtn.disabled = false;
+  }
+}
+
+function updateFontOpacity() {
+  _overlayOpacity = fontOpacityInput ? parseFloat(fontOpacityInput.value) : 0.55;
+  if (_overlayData) _drawOverlay();
+}
+
+// ---------------------------------------------------------------------------
+// Font identification (calls server per-char fingerprinting endpoint)
+// ---------------------------------------------------------------------------
+
+let lastFontAnalysisData = null;
+let fontIdentifyRunning = false;
+
+async function runFontIdentify() {
+  if (!currentDetailId) return;
+  if (fontIdentifyRunning) return;
+  fontIdentifyRunning = true;
+
+  const progressEl = document.getElementById("rdOptProgress");
+  if (progressEl) { progressEl.textContent = "Identifying font..."; progressEl.classList.remove("hidden"); }
+
+  if (!lastFontAnalysisData) {
+    try {
+      const resp = await fetch(`/redactions/${currentDetailId}/font-analysis/`);
+      if (resp.ok) {
+        lastFontAnalysisData = await resp.json();
+        renderFontOverlay(lastFontAnalysisData);
+      }
+    } catch (e) { console.error(e); }
+  }
+
+  try {
+    const resp = await fetch(`/redactions/${currentDetailId}/font-optimize/`);
+    if (!resp.ok) throw new Error("Font identification failed");
+    const data = await resp.json();
+
+    if (progressEl) progressEl.classList.add("hidden");
+    renderIdentifyResults(data);
+
+    if (data.best && lastFontAnalysisData) {
+      applyOptResult(data.best);
+    }
+  } catch (err) {
+    console.error(err);
+    if (progressEl) { progressEl.textContent = "Font identification failed."; }
+  } finally {
+    fontIdentifyRunning = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Font identification results rendering + apply
+// ---------------------------------------------------------------------------
+
+let lastOptResults = {};
+
+function renderIdentifyResults(data) {
+  const el = document.getElementById("rdOptResults");
+  if (!el) return;
+  el.innerHTML = "";
+  el.classList.remove("hidden");
+
+  const optimized = data.all_optimized || [];
+  const allCandidates = data.candidates || [];
+
+  if (!optimized.length) {
+    el.textContent = "No font matches found.";
+    return;
+  }
+
+  const section = document.createElement("div");
+  section.className = "rd-opt-section";
+
+  const heading = document.createElement("div");
+  heading.className = "rd-opt-heading";
+  heading.textContent = `Per-character fingerprint matching (${data.profile_chars || "?"} unique chars)`;
+  section.appendChild(heading);
+
+  optimized.forEach((r, idx) => {
+    const row = document.createElement("div");
+    row.className = "rd-meta-row" + (idx === 0 ? " rd-opt-winner" : "");
+    const sxLabel = r.scale_x != null && Math.abs(r.scale_x - 1) > 0.001 ? ` · sX:${r.scale_x}` : "";
+    const wsLabel = r.word_spacing_px != null && Math.abs(r.word_spacing_px) > 0.01 ? ` · ws:${r.word_spacing_px}px` : "";
+    const boldLabel = r.is_bold ? " [B]" : "";
+    const italicLabel = r.is_italic ? " [I]" : "";
+    row.innerHTML =
+      `<span class="rd-meta-label">${r.font_name}${boldLabel}${italicLabel}</span>` +
+      `<span class="rd-meta-value">` +
+        `RMSE: ${r.rmse} &middot; ` +
+        `${r.font_size_px}px &middot; ` +
+        `ls: ${r.letter_spacing_px}px` +
+        sxLabel + wsLabel +
+      `</span>`;
+
+    const applyBtn = document.createElement("button");
+    applyBtn.className = "btn btn-secondary rd-opt-apply";
+    applyBtn.textContent = "Apply";
+    applyBtn.addEventListener("click", () => applyOptResult(r));
+    row.appendChild(applyBtn);
+    section.appendChild(row);
+  });
+
+  if (allCandidates.length > optimized.length) {
+    const extra = document.createElement("div");
+    extra.className = "rd-opt-extra";
+    const others = allCandidates.slice(optimized.length).map(
+      (c) => `${c.font_name}: ${c.rmse}`
+    ).join(", ");
+    extra.textContent = `Other candidates: ${others}`;
+    section.appendChild(extra);
+  }
+
+  el.appendChild(section);
+}
+
+function applyOptResult(result) {
+  if (!lastFontAnalysisData) return;
+  _overlayOpacity = fontOpacityInput ? parseFloat(fontOpacityInput.value) : 0.55;
+  _overlayData = {
+    spans: lastFontAnalysisData.spans || [],
+    font_map: lastFontAnalysisData.font_map || {},
+    params: result,
+  };
+  _drawOverlay();
+
+  fontOverlayActive = true;
+  if (fontAnalyzeBtn) {
+    fontAnalyzeBtn.textContent = "Hide Font";
+    fontAnalyzeBtn.classList.add("active");
+  }
+  if (fontOpacityWrap) fontOpacityWrap.classList.remove("hidden");
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +597,139 @@ if (zoomTightBtn) zoomTightBtn.addEventListener("click", () => applyZoom("tight"
 if (zoomContextBtn) zoomContextBtn.addEventListener("click", () => applyZoom("context"));
 if (zoomPageBtn) zoomPageBtn.addEventListener("click", () => applyZoom("page"));
 
+if (fontAnalyzeBtn) fontAnalyzeBtn.addEventListener("click", () => {
+  if (currentDetailId) analyzeFont(currentDetailId);
+});
+if (fontOpacityInput) fontOpacityInput.addEventListener("input", updateFontOpacity);
+
+const identifyFontBtn = document.getElementById("rdIdentifyFont");
+if (identifyFontBtn) identifyFontBtn.addEventListener("click", runFontIdentify);
+
+// ---------------------------------------------------------------------------
+// Zoom slider
+// ---------------------------------------------------------------------------
+
+if (zoomSlider) zoomSlider.addEventListener("input", () => {
+  viewerInner.classList.add("no-transition");
+  const newScale = parseInt(zoomSlider.value) / 100;
+  const vw = viewer.clientWidth;
+  const vh = viewer.clientHeight;
+  const cx = vw / 2;
+  const cy = vh / 2;
+  const ratio = newScale / currentScale;
+  setTransform(newScale, cx - ratio * (cx - currentTx), cy - ratio * (cy - currentTy));
+});
+
+// ---------------------------------------------------------------------------
+// Wheel zoom (centered on cursor)
+// ---------------------------------------------------------------------------
+
+viewer.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  viewerInner.classList.add("no-transition");
+  const rect = viewer.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const factor = e.deltaY > 0 ? 0.92 : 1.08;
+  const newScale = Math.max(0.05, Math.min(10, currentScale * factor));
+  const ratio = newScale / currentScale;
+  setTransform(newScale, mx - ratio * (mx - currentTx), my - ratio * (my - currentTy));
+}, { passive: false });
+
+// ---------------------------------------------------------------------------
+// Drag to pan
+// ---------------------------------------------------------------------------
+
+let _isDragging = false;
+let _dragStartX, _dragStartY, _dragStartTx, _dragStartTy;
+
+viewer.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  _isDragging = true;
+  _dragStartX = e.clientX;
+  _dragStartY = e.clientY;
+  _dragStartTx = currentTx;
+  _dragStartTy = currentTy;
+  viewerInner.classList.add("no-transition");
+  viewer.style.cursor = "grabbing";
+  e.preventDefault();
+});
+
+window.addEventListener("mousemove", (e) => {
+  if (!_isDragging) return;
+  setTransform(
+    currentScale,
+    _dragStartTx + e.clientX - _dragStartX,
+    _dragStartTy + e.clientY - _dragStartY
+  );
+});
+
+window.addEventListener("mouseup", () => {
+  if (!_isDragging) return;
+  _isDragging = false;
+  viewer.style.cursor = "";
+});
+
+// ---------------------------------------------------------------------------
+// Touch: pinch zoom + single-finger pan
+// ---------------------------------------------------------------------------
+
+let _activeTouches = {};
+let _lastPinchDist = 0;
+let _lastPinchMid = null;
+let _singleTouchStart = null;
+
+viewer.addEventListener("touchstart", (e) => {
+  for (const t of e.changedTouches) _activeTouches[t.identifier] = { x: t.clientX, y: t.clientY };
+  const pts = Object.values(_activeTouches);
+  if (pts.length === 2) {
+    _lastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    _lastPinchMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  } else if (pts.length === 1) {
+    _singleTouchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, tx: currentTx, ty: currentTy };
+  }
+}, { passive: true });
+
+viewer.addEventListener("touchmove", (e) => {
+  for (const t of e.changedTouches) _activeTouches[t.identifier] = { x: t.clientX, y: t.clientY };
+  const pts = Object.values(_activeTouches);
+  viewerInner.classList.add("no-transition");
+
+  if (pts.length >= 2) {
+    e.preventDefault();
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    const rect = viewer.getBoundingClientRect();
+    const mx = mid.x - rect.left;
+    const my = mid.y - rect.top;
+    const factor = dist / _lastPinchDist;
+    const newScale = Math.max(0.05, Math.min(10, currentScale * factor));
+    const ratio = newScale / currentScale;
+    setTransform(
+      newScale,
+      mx - ratio * (mx - currentTx) + (mid.x - _lastPinchMid.x),
+      my - ratio * (my - currentTy) + (mid.y - _lastPinchMid.y)
+    );
+    _lastPinchDist = dist;
+    _lastPinchMid = mid;
+  } else if (pts.length === 1 && _singleTouchStart) {
+    e.preventDefault();
+    const dx = e.touches[0].clientX - _singleTouchStart.x;
+    const dy = e.touches[0].clientY - _singleTouchStart.y;
+    setTransform(currentScale, _singleTouchStart.tx + dx, _singleTouchStart.ty + dy);
+  }
+}, { passive: false });
+
+viewer.addEventListener("touchend", (e) => {
+  for (const t of e.changedTouches) delete _activeTouches[t.identifier];
+  if (Object.keys(_activeTouches).length === 0) _singleTouchStart = null;
+}, { passive: true });
+
+// ---------------------------------------------------------------------------
+// Grid
+// ---------------------------------------------------------------------------
+
+if (moreBtn) moreBtn.addEventListener("click", loadPage);
 if (sortSelect) sortSelect.addEventListener("change", resetAndLoad);
 if (methodSelect) methodSelect.addEventListener("change", resetAndLoad);
 if (searchBtn) searchBtn.addEventListener("click", resetAndLoad);
