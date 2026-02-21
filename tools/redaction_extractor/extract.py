@@ -13,12 +13,14 @@ import sys
 import logging
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 import click
 
 from redaction_extractor.models import ExtractionParams
 from redaction_extractor.parallel import process_corpus_with_tqdm, get_processing_stats
 from redaction_extractor.output_writer import write_all_outputs
+from redaction_extractor.db_writer import write_to_database
 
 
 # Configure logging
@@ -125,6 +127,12 @@ def validate_output_dir(ctx, param, value):
     is_flag=True,
     help="Skip image extraction (faster processing)"
 )
+@click.option(
+    "--db-url",
+    default=None,
+    envvar="REDACTION_DB_URL",
+    help="PostgreSQL connection URL to write results (e.g. postgresql://user:pass@host:5432/dbname)"
+)
 def main(
     input_dir: Path,
     output_dir: Path,
@@ -138,7 +146,8 @@ def main(
     iou_threshold: float,
     subset: int,
     verbose: bool,
-    no_images: bool
+    no_images: bool,
+    db_url: Optional[str],
 ):
     """
     Extract and catalogue redactions from PDF files.
@@ -176,6 +185,8 @@ def main(
     click.echo(f"  Extract images:   {not no_images}")
     if subset:
         click.echo(f"  Subset:           first {subset} PDFs")
+    if db_url:
+        click.echo(f"  Database:         {db_url.split('@')[-1] if '@' in db_url else '(configured)'}")
     click.echo()
     
     # Create output directory
@@ -264,6 +275,19 @@ def main(
             images_dir = output_dir / "images"
             image_count = len(list(images_dir.glob("*.png"))) if images_dir.exists() else 0
             click.echo(f"  {images_dir}/ ({image_count} images)")
+
+        if db_url:
+            click.echo()
+            click.echo("Writing to database...")
+            try:
+                run_id = write_to_database(corpus, params, db_url)
+                click.echo(f"  Extraction run ID: {run_id}")
+            except Exception as e:
+                click.echo(click.style(f"Error writing to database: {e}", fg="red"))
+                if verbose:
+                    import traceback
+                    traceback.print_exc()
+                sys.exit(1)
         
     except Exception as e:
         click.echo(click.style(f"Error writing outputs: {e}", fg="red"))

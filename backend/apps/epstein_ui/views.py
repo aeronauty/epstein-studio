@@ -19,6 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Count, Q
 from django.db.utils import OperationalError, ProgrammingError
 
+from django.http import FileResponse, Http404
 from .models import (
     Annotation,
     TextItem,
@@ -33,6 +34,9 @@ from .models import (
     PdfCommentReplyVote,
     PdfCommentVote,
     Notification,
+    ExtractionRun,
+    ExtractedDocument,
+    RedactionRecord,
 )
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[3] / "data"))
@@ -196,6 +200,8 @@ def start_page(request):
             .order_by("-vote_score")[:5]
             .values("filename", "vote_score")
         )
+
+        total_redactions = RedactionRecord.objects.count()
     except (OperationalError, ProgrammingError):
         total_pdfs = 0
         annotated_pdfs = 0
@@ -205,6 +211,7 @@ def start_page(request):
         coverage_pct = 0
         most_discussed = []
         most_promising = []
+        total_redactions = 0
 
     return render(request, "epstein_ui/start.html", {
         "total_pdfs": total_pdfs,
@@ -215,6 +222,7 @@ def start_page(request):
         "coverage_pct": coverage_pct,
         "most_discussed": most_discussed,
         "most_promising": most_promising,
+        "total_redactions": total_redactions,
     })
 
 
@@ -1201,3 +1209,147 @@ def comment_votes(request):
     except CommentVote.DoesNotExist:
         user_vote = 0
     return JsonResponse({"upvotes": upvotes, "downvotes": downvotes, "user_vote": user_vote})
+
+
+# ---------------------------------------------------------------------------
+# Redaction demo views
+# ---------------------------------------------------------------------------
+
+def redactions_demo(request):
+    """Render the redaction demo browse page."""
+    total = RedactionRecord.objects.count()
+    return render(request, "epstein_ui/redactions_demo.html", {"total_redactions": total})
+
+
+def redactions_list(request):
+    """Return paginated redaction records as JSON."""
+    try:
+        page_num = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page_num = 1
+    page_size = 24
+    sort = (request.GET.get("sort") or "estimated_chars").lower()
+    query = (request.GET.get("q") or "").strip()
+    method_filter = (request.GET.get("detection_method") or "").strip().lower()
+    run_id = request.GET.get("run_id")
+
+    qs = RedactionRecord.objects.select_related(
+        "extracted_document", "extracted_document__extraction_run"
+    )
+
+    if run_id:
+        try:
+            qs = qs.filter(extracted_document__extraction_run_id=int(run_id))
+        except ValueError:
+            pass
+    else:
+        latest_run = ExtractionRun.objects.order_by("-started_at").first()
+        if latest_run:
+            qs = qs.filter(extracted_document__extraction_run=latest_run)
+
+    if query:
+        qs = qs.filter(Q(text_before__icontains=query) | Q(text_after__icontains=query))
+    if method_filter in ("pymupdf", "opencv", "both"):
+        qs = qs.filter(detection_method=method_filter)
+
+    sort_map = {
+        "estimated_chars": "-estimated_chars",
+        "estimated_chars_asc": "estimated_chars",
+        "doc": "extracted_document__doc_id",
+        "page": "page_num",
+        "confidence": "-confidence",
+        "detection_method": "detection_method",
+    }
+    qs = qs.order_by(sort_map.get(sort, "-estimated_chars"), "pk")
+
+    total = qs.count()
+    start = (page_num - 1) * page_size
+    end = start + page_size
+    records = list(qs[start:end])
+
+    items = []
+    for r in records:
+        items.append({
+            "id": r.pk,
+            "doc_id": r.extracted_document.doc_id,
+            "page_num": r.page_num,
+            "redaction_index": r.redaction_index,
+            "estimated_chars": r.estimated_chars,
+            "detection_method": r.detection_method,
+            "confidence": round(r.confidence, 2),
+            "text_before_snippet": (r.text_before or "")[:80],
+            "text_after_snippet": (r.text_after or "")[:80],
+            "image_context": r.image_context,
+            "image_tight": r.image_tight,
+            "width_points": round(r.width_points, 1),
+            "height_points": round(r.height_points, 1),
+        })
+
+    return JsonResponse({
+        "items": items,
+        "total": total,
+        "page": page_num,
+        "has_more": end < total,
+    })
+
+
+def redaction_detail(request, pk):
+    """Return full detail JSON for a single redaction."""
+    try:
+        r = RedactionRecord.objects.select_related(
+            "extracted_document", "extracted_document__extraction_run"
+        ).get(pk=pk)
+    except RedactionRecord.DoesNotExist:
+        return JsonResponse({"error": "Not found"}, status=404)
+
+    doc = r.extracted_document
+    run = doc.extraction_run
+
+    return JsonResponse({
+        "id": r.pk,
+        "doc_id": doc.doc_id,
+        "file_path": doc.file_path,
+        "extraction_run_id": run.pk,
+        "run_started_at": run.started_at.isoformat(),
+        "page_num": r.page_num,
+        "redaction_index": r.redaction_index,
+        "bbox_x0_points": r.bbox_x0_points,
+        "bbox_y0_points": r.bbox_y0_points,
+        "bbox_x1_points": r.bbox_x1_points,
+        "bbox_y1_points": r.bbox_y1_points,
+        "width_points": round(r.width_points, 2),
+        "height_points": round(r.height_points, 2),
+        "bbox_x0_pixels": r.bbox_x0_pixels,
+        "bbox_y0_pixels": r.bbox_y0_pixels,
+        "bbox_x1_pixels": r.bbox_x1_pixels,
+        "bbox_y1_pixels": r.bbox_y1_pixels,
+        "width_pixels": r.width_pixels,
+        "height_pixels": r.height_pixels,
+        "detection_method": r.detection_method,
+        "confidence": round(r.confidence, 4),
+        "estimated_chars": r.estimated_chars,
+        "font_size_nearby": r.font_size_nearby,
+        "avg_char_width": r.avg_char_width,
+        "text_before": r.text_before,
+        "text_after": r.text_after,
+        "has_ascender_leakage": r.has_ascender_leakage,
+        "has_descender_leakage": r.has_descender_leakage,
+        "leakage_pixels_top": r.leakage_pixels_top,
+        "leakage_pixels_bottom": r.leakage_pixels_bottom,
+        "is_multiline": r.is_multiline,
+        "multiline_group_id": r.multiline_group_id,
+        "line_index_in_group": r.line_index_in_group,
+        "image_tight": r.image_tight,
+        "image_context": r.image_context,
+    })
+
+
+def redaction_image(request, filepath):
+    """Serve a redaction crop image from REDACTION_IMAGES_DIR."""
+    images_dir = Path(settings.REDACTION_IMAGES_DIR)
+    full_path = (images_dir / filepath).resolve()
+    if not str(full_path).startswith(str(images_dir.resolve())):
+        raise Http404
+    if not full_path.is_file():
+        raise Http404
+    return FileResponse(open(full_path, "rb"), content_type="image/png")

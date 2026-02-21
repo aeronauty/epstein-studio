@@ -131,6 +131,7 @@ STATIC_ROOT = BASE_DIR / 'static'
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+REDACTION_IMAGES_DIR = Path(os.environ.get("REDACTION_IMAGES_DIR", MEDIA_ROOT / "redaction_images"))
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/'
