@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Entities - Epstein Studio</title>
     <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
-    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=9" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=14" />
   </head>
   <body>
     <div class="page ent-page">
@@ -99,11 +99,61 @@
             <h2 id="entDetailTitle"></h2>
             <button id="entDetailClose" class="btn btn-secondary btn-sm">&times;</button>
           </div>
-          <div id="entDetailBody" class="ent-detail-body"></div>
+          <div class="ent-detail-sub-tabs">
+            <button class="ent-detail-tab active" data-dtab="occurrences">Occurrences</button>
+            <button class="ent-detail-tab" data-dtab="matches">Redaction Matches</button>
+          </div>
+          <div id="entDetailOccurrences" class="ent-detail-body"></div>
+          <div id="entDetailMatches" class="ent-detail-body" style="display:none"></div>
         </div>
       </main>
+
+      <!-- Redaction viewer overlay (shared with redactions page) -->
+      <div id="entViewerOverlay" class="rd-overlay hidden">
+        <div class="rd-detail">
+          <div class="rd-detail-header">
+            <h2 id="entViewerTitle" class="rd-detail-title"></h2>
+            <button id="entViewerClose" class="btn btn-secondary rd-close-btn" type="button">Close</button>
+          </div>
+          <div class="rd-detail-body">
+            <div class="rd-zoom-bar">
+              <button id="evZoomTight" class="btn btn-secondary" type="button">Tight</button>
+              <button id="evZoomContext" class="btn btn-secondary active" type="button">Context</button>
+              <button id="evZoomPage" class="btn btn-secondary" type="button">Page</button>
+              <span class="rd-zoom-sep"></span>
+              <label class="rd-zoom-slider-wrap">
+                <span class="rd-zoom-slider-label">Zoom</span>
+                <input id="evZoomSlider" type="range" min="10" max="500" value="100" />
+                <span id="evZoomLevel">100%</span>
+              </label>
+            </div>
+            <div id="evViewer" class="rd-viewer">
+              <div id="evViewerInner" class="rd-viewer-inner">
+                <img id="evPageImg" alt="PDF page" />
+                <div id="evBox" class="rd-redaction-box"></div>
+              </div>
+            </div>
+            <div id="evCandPreview" class="rd-cand-preview">
+              <div class="rd-cand-preview-header">
+                <span class="rd-text-heading">Candidate in redaction</span>
+              </div>
+              <div id="evCandFit" class="rd-cand-fit"></div>
+            </div>
+            <div class="rd-detail-info">
+              <div class="rd-detail-section">
+                <div class="rd-detail-label">Text Before</div>
+                <div id="evDetailBefore" class="rd-detail-text"></div>
+              </div>
+              <div class="rd-detail-section">
+                <div class="rd-detail-label">Text After</div>
+                <div id="evDetailAfter" class="rd-detail-text"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <script src="{% static 'epstein_ui/entities.js' %}?v=2"></script>
+    <script src="{% static 'epstein_ui/entities.js' %}?v=4"></script>
   </body>
 </html>

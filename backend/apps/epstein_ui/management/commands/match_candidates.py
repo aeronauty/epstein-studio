@@ -247,18 +247,27 @@ class Command(BaseCommand):
                 for t in candidate_texts
             ]
 
-        # 4. Leakage analysis
-        leakage_data = {"ascender_fragments": [], "descender_fragments": []}
-        if r.has_ascender_leakage or r.has_descender_leakage:
-            try:
-                pdf_path = Path(doc_record.file_path)
-                page_png = _render_single_page(pdf_path, r.page_num, dpi)
-                font_size_px = font_size_pt * scale
-                leakage_data = _analyze_leakage_letterforms(
-                    page_png, redaction_bbox_px, font_size_px, dpi
+        # 4. Leakage analysis — always run
+        leakage_data = {"ascender_fragments": [], "descender_fragments": [],
+                        "left_fragments": [], "right_fragments": []}
+        try:
+            pdf_path = Path(doc_record.file_path)
+            page_png = _render_single_page(pdf_path, r.page_num, dpi)
+            font_size_px = font_size_pt * scale
+            leakage_data = _analyze_leakage_letterforms(
+                page_png, redaction_bbox_px, font_size_px, dpi
+            )
+            has_asc = bool(leakage_data.get("ascender_fragments"))
+            has_desc = bool(leakage_data.get("descender_fragments"))
+            has_left = bool(leakage_data.get("left_fragments"))
+            has_right = bool(leakage_data.get("right_fragments"))
+            if has_asc or has_desc or has_left or has_right:
+                RedactionRecord.objects.filter(pk=r.pk).update(
+                    has_ascender_leakage=has_asc or has_left,
+                    has_descender_leakage=has_desc or has_right,
                 )
-            except Exception:
-                pass
+        except Exception:
+            pass
 
         # 5. Score and rank
         font_size_px = font_size_pt * scale

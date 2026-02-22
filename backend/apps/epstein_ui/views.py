@@ -19,6 +19,36 @@ from .models import (
 )
 
 
+def docs_page(request, slug=None):
+    """Render project documentation from the docs/ markdown files."""
+    import markdown
+
+    docs_dir = Path(settings.BASE_DIR).parent / "docs"
+    doc_files = sorted(docs_dir.glob("*.md"))
+
+    toc = []
+    for f in doc_files:
+        s = f.stem
+        toc.append({"slug": s, "title": s.replace("-", " ").replace("_", " ").title(), "active": s == slug})
+
+    if not slug:
+        slug = toc[0]["slug"] if toc else None
+        toc[0]["active"] = True
+
+    md_path = docs_dir / f"{slug}.md"
+    if not md_path.exists():
+        raise Http404(f"Doc '{slug}' not found")
+
+    md_text = md_path.read_text()
+    html_content = markdown.markdown(md_text, extensions=["fenced_code", "tables", "toc", "codehilite"])
+
+    return render(request, "epstein_ui/docs.html", {
+        "toc": toc,
+        "content": html_content,
+        "current_slug": slug,
+    })
+
+
 def start_page(request):
     """Landing page with basic stats."""
     try:
@@ -123,12 +153,95 @@ def entity_detail(request, entity_text):
         .values(
             "entity_text", "entity_type", "page_num", "count",
             "extracted_document__doc_id",
+            "extracted_document__file_path",
         )[:200]
     )
+
+    with_bbox = request.GET.get("bbox") == "1"
+    if with_bbox:
+        import fitz
+
+        for rec in records:
+            rec["bboxes"] = []
+            pdf_path = rec.pop("extracted_document__file_path", "")
+            page_num = rec.get("page_num")
+            if not pdf_path or not page_num:
+                continue
+            try:
+                doc = fitz.open(pdf_path)
+                if page_num - 1 < len(doc):
+                    page = doc[page_num - 1]
+                    hits = page.search_for(entity_text, quads=False)
+                    for rect in hits[:5]:
+                        rec["bboxes"].append([
+                            round(rect.x0, 1), round(rect.y0, 1),
+                            round(rect.x1, 1), round(rect.y1, 1),
+                        ])
+                doc.close()
+            except Exception:
+                pass
+    else:
+        for rec in records:
+            rec.pop("extracted_document__file_path", None)
+
     return JsonResponse({
         "entity_text": entity_text,
         "occurrences": records,
         "total": len(records),
+    })
+
+
+def entity_redaction_matches(request, entity_text):
+    """Return redactions where entity_text appears as a candidate match."""
+    from django.db.models import F
+
+    try:
+        page_num = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page_num = 1
+    page_size = 30
+
+    qs = (
+        RedactionCandidate.objects
+        .filter(candidate_text=entity_text)
+        .select_related("redaction", "redaction__extracted_document")
+        .order_by("rank")
+    )
+
+    total = qs.count()
+    start = (page_num - 1) * page_size
+    items = []
+    for rc in qs[start : start + page_size]:
+        r = rc.redaction
+        doc = r.extracted_document
+        items.append({
+            "redaction_id": r.pk,
+            "doc_id": doc.doc_id if doc else "",
+            "page_num": r.page_num,
+            "redaction_index": r.redaction_index,
+            "rank": rc.rank,
+            "total_score": round(rc.total_score, 3),
+            "width_ratio": round(rc.width_ratio, 3),
+            "width_fit": round(rc.width_fit, 3),
+            "nlp_score": round(rc.nlp_score, 3),
+            "text_before": (r.text_before or "")[-60:],
+            "text_after": (r.text_after or "")[:60],
+            "bbox_x0": r.bbox_x0_points,
+            "bbox_y0": r.bbox_y0_points,
+            "bbox_x1": r.bbox_x1_points,
+            "bbox_y1": r.bbox_y1_points,
+            "width_pt": round(r.width_points, 1),
+            "height_pt": round(r.height_points, 1),
+            "estimated_chars": r.estimated_chars,
+            "image_context": r.image_context,
+        })
+
+    return JsonResponse({
+        "entity_text": entity_text,
+        "items": items,
+        "total": total,
+        "page": page_num,
+        "has_more": start + page_size < total,
     })
 
 
@@ -1298,14 +1411,15 @@ DESCENDER_LETTERS = set("gjpqyQJ")
 
 
 def _analyze_leakage_letterforms(page_pixmap_path, redaction_bbox_px, font_size_px, dpi):
-    """Analyze pixel bands above/below redaction for leaked letterform fragments."""
+    """Analyze pixel bands above/below/left/right of redaction for leaked letterform fragments."""
     import numpy as np
     from PIL import Image
 
     try:
         img = Image.open(str(page_pixmap_path)).convert("L")
     except Exception:
-        return {"ascender_fragments": [], "descender_fragments": []}
+        return {"ascender_fragments": [], "descender_fragments": [],
+                "left_fragments": [], "right_fragments": []}
 
     img_array = np.array(img)
     h, w = img_array.shape
@@ -1313,8 +1427,10 @@ def _analyze_leakage_letterforms(page_pixmap_path, redaction_bbox_px, font_size_
 
     ascender_band_h = max(2, int(font_size_px * 0.35))
     descender_band_h = max(2, int(font_size_px * 0.25))
+    edge_band_w = max(3, int(font_size_px * 0.6))
 
-    results = {"ascender_fragments": [], "descender_fragments": []}
+    results = {"ascender_fragments": [], "descender_fragments": [],
+               "left_fragments": [], "right_fragments": []}
 
     band_top_y0 = max(0, y0 - ascender_band_h)
     band_top_y1 = y0
@@ -1330,7 +1446,75 @@ def _analyze_leakage_letterforms(page_pixmap_path, redaction_bbox_px, font_size_
         fragments = _find_dark_fragments(band, x0, font_size_px)
         results["descender_fragments"] = fragments
 
+    left_x0 = max(0, x0 - edge_band_w)
+    left_x1 = x0
+    if left_x1 > left_x0 and y1 > y0:
+        band = img_array[y0:y1, left_x0:left_x1]
+        fragments = _find_dark_fragments_vertical(band, y0, font_size_px)
+        results["left_fragments"] = fragments
+
+    right_x0 = x1
+    right_x1 = min(w, x1 + edge_band_w)
+    if right_x1 > right_x0 and y1 > y0:
+        band = img_array[y0:y1, right_x0:right_x1]
+        fragments = _find_dark_fragments_vertical(band, y0, font_size_px)
+        results["right_fragments"] = fragments
+
     return results
+
+
+def _find_dark_fragments_vertical(band, y_offset, font_size_px):
+    """Find dark pixel regions in a vertical edge band (columns scanned for row presence)."""
+    import numpy as np
+
+    if band.size == 0:
+        return []
+
+    threshold = 180
+    dark_mask = band < threshold
+    row_has_dark = np.any(dark_mask, axis=1)
+
+    fragments = []
+    in_fragment = False
+    frag_start = 0
+
+    for row_idx in range(len(row_has_dark)):
+        if row_has_dark[row_idx]:
+            if not in_fragment:
+                frag_start = row_idx
+                in_fragment = True
+        else:
+            if in_fragment:
+                frag_h = row_idx - frag_start
+                if frag_h >= 2:
+                    frag_region = dark_mask[frag_start:row_idx, :]
+                    density = float(np.sum(frag_region)) / max(frag_region.size, 1)
+                    frag_w = int(np.max(np.sum(dark_mask[frag_start:row_idx, :], axis=0)))
+                    fragments.append({
+                        "y_start": frag_start + y_offset,
+                        "y_end": row_idx + y_offset,
+                        "height_px": frag_h,
+                        "width_px": frag_w,
+                        "pixel_density": round(density, 3),
+                    })
+                in_fragment = False
+
+    if in_fragment:
+        row_idx = len(row_has_dark)
+        frag_h = row_idx - frag_start
+        if frag_h >= 2:
+            frag_region = dark_mask[frag_start:row_idx, :]
+            density = float(np.sum(frag_region)) / max(frag_region.size, 1)
+            frag_w = int(np.max(np.sum(dark_mask[frag_start:row_idx, :], axis=0)))
+            fragments.append({
+                "y_start": frag_start + y_offset,
+                "y_end": row_idx + y_offset,
+                "height_px": frag_h,
+                "width_px": frag_w,
+                "pixel_density": round(density, 3),
+            })
+
+    return fragments
 
 
 def _find_dark_fragments(band, x_offset, font_size_px):
@@ -1395,8 +1579,10 @@ def _match_leakage_to_candidates(leakage_data, candidate_text, font_size_px):
     """Score how well a candidate's letter positions match observed leakage fragments."""
     asc_frags = leakage_data.get("ascender_fragments", [])
     desc_frags = leakage_data.get("descender_fragments", [])
+    left_frags = leakage_data.get("left_fragments", [])
+    right_frags = leakage_data.get("right_fragments", [])
 
-    if not asc_frags and not desc_frags:
+    if not asc_frags and not desc_frags and not left_frags and not right_frags:
         return 0.5
 
     avg_char_w = max(font_size_px * 0.5, 1)
@@ -1426,6 +1612,18 @@ def _match_leakage_to_candidates(leakage_data, candidate_text, font_size_px):
             else:
                 score -= 0.5
             checks += 1
+
+    if left_frags:
+        first_ch = candidate_text[0] if candidate_text else ""
+        if first_ch and (first_ch in ASCENDER_LETTERS or first_ch in DESCENDER_LETTERS or first_ch.isupper()):
+            score += 0.5
+        checks += 1
+
+    if right_frags:
+        last_ch = candidate_text[-1] if candidate_text else ""
+        if last_ch and (last_ch in ASCENDER_LETTERS or last_ch in DESCENDER_LETTERS):
+            score += 0.5
+        checks += 1
 
     if not asc_frags:
         has_ascender = any(ch in ASCENDER_LETTERS for ch in candidate_text if ch.isalpha())
@@ -1666,21 +1864,30 @@ def redaction_text_candidates(request, pk):
             for t in candidate_texts
         ]
 
-    # 4. Leakage analysis
-    leakage_data = {"ascender_fragments": [], "descender_fragments": []}
-    if r.has_ascender_leakage or r.has_descender_leakage:
-        try:
-            page_png = _render_single_page(pdf_path, r.page_num, dpi)
-            redaction_bbox_px = [round(v * scale) for v in (
-                r.bbox_x0_points, r.bbox_y0_points,
-                r.bbox_x1_points, r.bbox_y1_points,
-            )]
-            font_size_px = font_size_pt * scale
-            leakage_data = _analyze_leakage_letterforms(
-                page_png, redaction_bbox_px, font_size_px, dpi
+    # 4. Leakage analysis — always run (detect on-the-fly)
+    leakage_data = {"ascender_fragments": [], "descender_fragments": [],
+                    "left_fragments": [], "right_fragments": []}
+    try:
+        page_png = _render_single_page(pdf_path, r.page_num, dpi)
+        redaction_bbox_px = [round(v * scale) for v in (
+            r.bbox_x0_points, r.bbox_y0_points,
+            r.bbox_x1_points, r.bbox_y1_points,
+        )]
+        font_size_px = font_size_pt * scale
+        leakage_data = _analyze_leakage_letterforms(
+            page_png, redaction_bbox_px, font_size_px, dpi
+        )
+        has_asc = bool(leakage_data.get("ascender_fragments"))
+        has_desc = bool(leakage_data.get("descender_fragments"))
+        has_left = bool(leakage_data.get("left_fragments"))
+        has_right = bool(leakage_data.get("right_fragments"))
+        if (has_asc != r.has_ascender_leakage or has_desc != r.has_descender_leakage):
+            RedactionRecord.objects.filter(pk=r.pk).update(
+                has_ascender_leakage=has_asc or has_left,
+                has_descender_leakage=has_desc or has_right,
             )
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     # 5. Score and rank
     font_size_px = font_size_pt * scale

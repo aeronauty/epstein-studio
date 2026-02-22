@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Candidate Matches - Epstein Studio</title>
     <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
-    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=12" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=15" />
   </head>
   <body>
     <div class="page mat-page">
@@ -78,8 +78,58 @@
           <div id="matTopNames"></div>
         </div>
       </main>
+
+      <!-- Redaction viewer overlay -->
+      <div id="mvOverlay" class="rd-overlay hidden">
+        <div class="rd-detail">
+          <div class="rd-detail-header">
+            <h2 id="mvTitle" class="rd-detail-title"></h2>
+            <button id="mvClose" class="btn btn-secondary rd-close-btn" type="button">Close</button>
+          </div>
+          <div class="rd-detail-body">
+            <div class="rd-zoom-bar">
+              <button id="mvZoomTight" class="btn btn-secondary" type="button">Tight</button>
+              <button id="mvZoomContext" class="btn btn-secondary active" type="button">Context</button>
+              <button id="mvZoomPage" class="btn btn-secondary" type="button">Page</button>
+              <span class="rd-zoom-sep"></span>
+              <label class="rd-zoom-slider-wrap">
+                <span class="rd-zoom-slider-label">Zoom</span>
+                <input id="mvZoomSlider" type="range" min="10" max="500" value="100" />
+                <span id="mvZoomLevel">100%</span>
+              </label>
+            </div>
+            <div id="mvViewer" class="rd-viewer">
+              <div id="mvViewerInner" class="rd-viewer-inner">
+                <img id="mvPageImg" alt="PDF page" />
+                <div id="mvBox" class="rd-redaction-box"></div>
+              </div>
+            </div>
+            <div id="mvCandPanel" class="rd-cand-preview">
+              <div class="rd-cand-preview-header">
+                <span class="rd-text-heading">Candidate Preview</span>
+                <div class="rd-cand-nav">
+                  <button id="mvCandPrev" class="btn btn-secondary btn-sm" type="button">&laquo;</button>
+                  <select id="mvCandSelect" class="rd-cand-select"></select>
+                  <button id="mvCandNext" class="btn btn-secondary btn-sm" type="button">&raquo;</button>
+                </div>
+              </div>
+              <div id="mvCandFit" class="rd-cand-fit"></div>
+            </div>
+            <div class="rd-detail-info">
+              <div class="rd-detail-section">
+                <div class="rd-detail-label">Text Before</div>
+                <div id="mvBefore" class="rd-detail-text"></div>
+              </div>
+              <div class="rd-detail-section">
+                <div class="rd-detail-label">Text After</div>
+                <div id="mvAfter" class="rd-detail-text"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <script src="{% static 'epstein_ui/matches.js' %}?v=3"></script>
+    <script src="{% static 'epstein_ui/matches.js' %}?v=5"></script>
   </body>
 </html>

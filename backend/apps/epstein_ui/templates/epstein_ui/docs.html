@@ -1,0 +1,42 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Docs - Epstein Studio</title>
+    <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=13" />
+  </head>
+  <body>
+    <div class="page docs-page">
+      <header class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-left">
+            <a href="/" class="brand">Epstein Studio</a>
+          </div>
+          <div class="topbar-actions">
+            <a class="btn btn-secondary" href="/redactions-demo/">Redactions</a>
+            <a class="btn btn-secondary" href="/entities/">Entities</a>
+            <a class="btn btn-secondary" href="/matches/">Matches</a>
+            <a class="btn btn-outline active" href="/docs/">Docs</a>
+          </div>
+        </div>
+      </header>
+
+      <div class="docs-layout">
+        <nav class="docs-sidebar">
+          <h3 class="docs-sidebar-title">Documentation</h3>
+          {% for item in toc %}
+            <a class="docs-nav-link {% if item.active %}active{% endif %}"
+               href="/docs/{{ item.slug }}/">{{ item.title }}</a>
+          {% endfor %}
+        </nav>
+
+        <main class="docs-content">
+          {{ content|safe }}
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

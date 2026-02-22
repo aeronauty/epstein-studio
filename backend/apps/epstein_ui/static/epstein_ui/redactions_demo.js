@@ -368,6 +368,7 @@ function clearFontOverlay() {
   const textResultsEl = document.getElementById("rdTextResults");
   if (textResultsEl) textResultsEl.classList.add("hidden");
   lastOptResults = {};
+  hideCandidatePreview();
 }
 
 function renderFontOverlay(data) {
@@ -596,6 +597,16 @@ async function runTextIdentify(extraCandidates) {
   const progressEl = document.getElementById("rdOptProgress");
   if (progressEl) { progressEl.textContent = "Identifying text..."; progressEl.classList.remove("hidden"); }
 
+  if (!lastFontAnalysisData) {
+    try {
+      const faResp = await fetch(`/redactions/${currentDetailId}/font-analysis/`);
+      if (faResp.ok) {
+        lastFontAnalysisData = await faResp.json();
+        renderFontOverlay(lastFontAnalysisData);
+      }
+    } catch (e) { console.error(e); }
+  }
+
   let url = `/redactions/${currentDetailId}/text-candidates/`;
   const candidatesInput = document.getElementById("rdCustomCandidates");
   const parts = [];
@@ -614,6 +625,7 @@ async function runTextIdentify(extraCandidates) {
 
     if (progressEl) progressEl.classList.add("hidden");
     renderTextResults(data);
+    initCandidatePreview(data);
   } catch (err) {
     console.error(err);
     if (progressEl) { progressEl.textContent = "Text identification failed."; }
@@ -755,6 +767,159 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// ---------------------------------------------------------------------------
+// Candidate preview overlay (render candidate text in redaction bbox)
+// ---------------------------------------------------------------------------
+
+let _candPreviewData = null; // { candidates, fontInfo, bbox }
+let _candPreviewIdx = 0;
+
+function initCandidatePreview(textData) {
+  const allCands = [...(textData.candidates || []), ...(textData.other_candidates || [])];
+  if (!allCands.length || !currentBbox) {
+    hideCandidatePreview();
+    return;
+  }
+
+  _candPreviewData = {
+    candidates: allCands.slice(0, 20),
+    fontName: textData.font_identified,
+    fontSizePt: textData.font_size_pt,
+    widthPt: textData.redaction_width_pt,
+    preciseGapPt: textData.precise_gap_pt,
+  };
+  _candPreviewIdx = 0;
+
+  const select = document.getElementById("rdCandSelect");
+  if (select) {
+    select.innerHTML = "";
+    _candPreviewData.candidates.forEach((c, i) => {
+      const opt = document.createElement("option");
+      opt.value = i;
+      opt.textContent = `#${i + 1} ${c.text} (${c.score})`;
+      select.appendChild(opt);
+    });
+  }
+
+  const previewEl = document.getElementById("rdCandPreview");
+  if (previewEl) previewEl.classList.remove("hidden");
+
+  drawCandidatePreview();
+}
+
+function hideCandidatePreview() {
+  _candPreviewData = null;
+  const previewEl = document.getElementById("rdCandPreview");
+  if (previewEl) previewEl.classList.add("hidden");
+}
+
+function drawCandidatePreview() {
+  if (!_candPreviewData || !currentBbox || !pageImg.naturalWidth) return;
+
+  if (_overlayData) _drawOverlay();
+  else {
+    const canvas = _getOverlayCanvas();
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const canvas = _getOverlayCanvas();
+  const ctx = canvas.getContext("2d");
+
+  const cand = _candPreviewData.candidates[_candPreviewIdx];
+  if (!cand) return;
+
+  const bbox = currentBbox;
+  const bx = bbox.x0;
+  const by = bbox.y0;
+  const bw = bbox.x1 - bbox.x0;
+  const bh = bbox.y1 - bbox.y0;
+
+  let cssFamily = "serif";
+  let fontWeight = "normal";
+  let fontStyle = "normal";
+  let fontSize = bh * 0.7;
+
+  if (_overlayData && _overlayData.spans && _overlayData.spans.length) {
+    const sameLineSpans = _overlayData.spans.filter(
+      (s) => s.origin_px && Math.abs(s.origin_px[1] - (by + bh * 0.75)) < bh
+    );
+    const refSpan = sameLineSpans[0] || _overlayData.spans[0];
+    const fontInfo = _overlayData.font_map ? _overlayData.font_map[refSpan.font_name] : null;
+    cssFamily = (_overlayData.params && _overlayData.params.css_family) ||
+                (fontInfo ? fontInfo.css_family : "serif");
+    fontWeight = refSpan.font_weight === "bold" ? "bold" : "normal";
+    fontStyle = refSpan.font_style === "italic" ? "italic" : "normal";
+    fontSize = refSpan.font_size_px * (_overlayData.params?.size_scale ?? 1);
+  } else if (_candPreviewData.fontSizePt) {
+    const scale = pageImg.naturalWidth / (pageImg.naturalWidth / (150 / 72));
+    fontSize = _candPreviewData.fontSizePt * (150 / 72);
+  }
+
+  const baseline = by + bh * 0.78;
+
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = "#00e5ff";
+  ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${cssFamily}`;
+  ctx.textBaseline = "alphabetic";
+
+  if (_overlayData && _overlayData.params) {
+    const p = _overlayData.params;
+    if (typeof ctx.letterSpacing !== "undefined")
+      ctx.letterSpacing = (p.letter_spacing_px || 0) + "px";
+    if (typeof ctx.wordSpacing !== "undefined")
+      ctx.wordSpacing = (p.word_spacing_px || 0) + "px";
+    const scaleX = p.scale_x ?? 1.0;
+    if (Math.abs(scaleX - 1.0) > 0.001) {
+      ctx.translate(bx + 2, baseline);
+      ctx.scale(scaleX, 1);
+      ctx.fillText(cand.text, 0, 0);
+    } else {
+      ctx.fillText(cand.text, bx + 2, baseline);
+    }
+  } else {
+    ctx.fillText(cand.text, bx + 2, baseline);
+  }
+
+  if (typeof ctx.letterSpacing !== "undefined") ctx.letterSpacing = "0px";
+  if (typeof ctx.wordSpacing !== "undefined") ctx.wordSpacing = "0px";
+  ctx.restore();
+
+  const fitEl = document.getElementById("rdCandFit");
+  if (fitEl && cand.width_ratio) {
+    const err = Math.abs(1 - cand.width_ratio) * 100;
+    const col = err <= 3 ? "#2ecc71" : err <= 10 ? "#f1c40f" : "#e74c3c";
+    const label = err <= 3 ? "Excellent fit" : err <= 10 ? "Good fit" : "Poor fit";
+    fitEl.innerHTML = `<span class="rd-fit-indicator" style="--fit-col:${col}">${label}</span>` +
+      ` <span class="rd-fit-ratio">${cand.width_ratio}x width · score ${cand.score}</span>`;
+  }
+}
+
+// Candidate preview navigation
+const _candSelectEl = document.getElementById("rdCandSelect");
+const _candPrevBtn = document.getElementById("rdCandPrev");
+const _candNextBtn = document.getElementById("rdCandNext");
+
+if (_candSelectEl) _candSelectEl.addEventListener("change", () => {
+  _candPreviewIdx = parseInt(_candSelectEl.value) || 0;
+  drawCandidatePreview();
+});
+if (_candPrevBtn) _candPrevBtn.addEventListener("click", () => {
+  if (_candPreviewData && _candPreviewIdx > 0) {
+    _candPreviewIdx--;
+    if (_candSelectEl) _candSelectEl.value = _candPreviewIdx;
+    drawCandidatePreview();
+  }
+});
+if (_candNextBtn) _candNextBtn.addEventListener("click", () => {
+  if (_candPreviewData && _candPreviewIdx < _candPreviewData.candidates.length - 1) {
+    _candPreviewIdx++;
+    if (_candSelectEl) _candSelectEl.value = _candPreviewIdx;
+    drawCandidatePreview();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Event listeners

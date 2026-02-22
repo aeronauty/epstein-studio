@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Redaction Demo - Epstein Studio</title>
     <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
-    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=8" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=14" />
   </head>
   <body>
     <div class="page rd-page">
@@ -105,6 +105,17 @@
                 <input id="rdCustomCandidates" type="text" placeholder="Enter candidate names (comma-separated)..." />
                 <button id="rdCustomCandidatesBtn" class="btn btn-secondary" type="button">Score</button>
               </div>
+              <div id="rdCandPreview" class="rd-cand-preview hidden">
+                <div class="rd-cand-preview-header">
+                  <span class="rd-text-heading">Candidate Preview</span>
+                  <div class="rd-cand-nav">
+                    <button id="rdCandPrev" class="btn btn-secondary btn-sm" type="button">&laquo;</button>
+                    <select id="rdCandSelect" class="rd-cand-select"></select>
+                    <button id="rdCandNext" class="btn btn-secondary btn-sm" type="button">&raquo;</button>
+                  </div>
+                </div>
+                <div id="rdCandFit" class="rd-cand-fit"></div>
+              </div>
               <div id="rdTextCandidates" class="rd-text-section"></div>
             </div>
             <div class="rd-detail-info">
@@ -122,6 +133,6 @@
         </div>
       </div>
     </div>
-    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=10"></script>
+    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=11"></script>
   </body>
 </html>
