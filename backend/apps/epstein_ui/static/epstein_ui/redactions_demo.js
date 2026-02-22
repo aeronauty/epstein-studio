@@ -365,6 +365,8 @@ function clearFontOverlay() {
   if (optResultsEl) { optResultsEl.classList.add("hidden"); optResultsEl.innerHTML = ""; }
   const progressEl = document.getElementById("rdOptProgress");
   if (progressEl) progressEl.classList.add("hidden");
+  const textResultsEl = document.getElementById("rdTextResults");
+  if (textResultsEl) textResultsEl.classList.add("hidden");
   lastOptResults = {};
 }
 
@@ -581,6 +583,180 @@ function applyOptResult(result) {
 }
 
 // ---------------------------------------------------------------------------
+// Text identification
+// ---------------------------------------------------------------------------
+
+let textIdentifyRunning = false;
+
+async function runTextIdentify(extraCandidates) {
+  if (!currentDetailId) return;
+  if (textIdentifyRunning) return;
+  textIdentifyRunning = true;
+
+  const progressEl = document.getElementById("rdOptProgress");
+  if (progressEl) { progressEl.textContent = "Identifying text..."; progressEl.classList.remove("hidden"); }
+
+  let url = `/redactions/${currentDetailId}/text-candidates/`;
+  const candidatesInput = document.getElementById("rdCustomCandidates");
+  const parts = [];
+  if (candidatesInput && candidatesInput.value.trim()) {
+    parts.push(candidatesInput.value.trim());
+  }
+  if (extraCandidates) parts.push(extraCandidates);
+  if (parts.length) {
+    url += `?candidates=${encodeURIComponent(parts.join(","))}`;
+  }
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error("Text identification failed");
+    const data = await resp.json();
+
+    if (progressEl) progressEl.classList.add("hidden");
+    renderTextResults(data);
+  } catch (err) {
+    console.error(err);
+    if (progressEl) { progressEl.textContent = "Text identification failed."; }
+  } finally {
+    textIdentifyRunning = false;
+  }
+}
+
+function renderTextResults(data) {
+  const container = document.getElementById("rdTextResults");
+  if (!container) return;
+  container.classList.remove("hidden");
+
+  const gapEl = document.getElementById("rdTextGap");
+  const leakEl = document.getElementById("rdTextLeakage");
+  const candEl = document.getElementById("rdTextCandidates");
+
+  // Gap predictions
+  if (gapEl) {
+    gapEl.innerHTML = "";
+    const heading = document.createElement("div");
+    heading.className = "rd-text-heading";
+    heading.textContent = "Predicted gap type";
+    gapEl.appendChild(heading);
+
+    const preds = data.gap_predictions || [];
+    if (!preds.length) {
+      gapEl.innerHTML += '<div class="rd-gap-tag rd-gap-tag-low">Unknown</div>';
+    } else {
+      preds.forEach((p) => {
+        const cls = p.confidence >= 0.5 ? "rd-gap-tag" : "rd-gap-tag rd-gap-tag-low";
+        const tag = document.createElement("span");
+        tag.className = cls;
+        tag.textContent = `${p.entity_type} (${Math.round(p.confidence * 100)}%)`;
+        gapEl.appendChild(tag);
+        const reason = document.createElement("span");
+        reason.className = "rd-gap-reason";
+        reason.textContent = p.reason;
+        gapEl.appendChild(reason);
+        gapEl.appendChild(document.createElement("br"));
+      });
+    }
+
+    if (data.font_identified) {
+      const info = document.createElement("div");
+      info.className = "rd-char-range";
+      info.textContent = `Font: ${data.font_identified} at ${data.font_size_pt}pt`;
+      if (data.estimated_char_range) {
+        info.textContent += ` · Est. ${data.estimated_char_range[0]}–${data.estimated_char_range[1]} chars`;
+      }
+      info.textContent += ` · Width: ${data.redaction_width_pt}pt`;
+      gapEl.appendChild(info);
+    }
+  }
+
+  // Leakage
+  if (leakEl) {
+    leakEl.innerHTML = "";
+    const leakage = data.leakage || {};
+    const ascFrags = leakage.ascender_fragments || [];
+    const descFrags = leakage.descender_fragments || [];
+
+    if (ascFrags.length || descFrags.length) {
+      const heading = document.createElement("div");
+      heading.className = "rd-text-heading";
+      heading.textContent = "Leakage detection";
+      leakEl.appendChild(heading);
+
+      const bar = document.createElement("div");
+      bar.className = "rd-leakage-bar";
+
+      if (ascFrags.length) {
+        const label = document.createElement("span");
+        label.className = "rd-leakage-frag";
+        label.textContent = `Ascender: ${ascFrags.length} fragment${ascFrags.length > 1 ? "s" : ""}`;
+        ascFrags.forEach((f) => {
+          label.textContent += ` [pos ~${f.position_estimate}]`;
+        });
+        bar.appendChild(label);
+      }
+      if (descFrags.length) {
+        const label = document.createElement("span");
+        label.className = "rd-leakage-frag";
+        label.textContent = `Descender: ${descFrags.length} fragment${descFrags.length > 1 ? "s" : ""}`;
+        descFrags.forEach((f) => {
+          label.textContent += ` [pos ~${f.position_estimate}]`;
+        });
+        bar.appendChild(label);
+      }
+      leakEl.appendChild(bar);
+    }
+  }
+
+  // Candidates table
+  if (candEl) {
+    candEl.innerHTML = "";
+    const allCands = [...(data.candidates || []), ...(data.other_candidates || [])];
+
+    if (!allCands.length) {
+      candEl.innerHTML = '<div class="rd-text-heading">No candidates scored</div><div style="font-size:12px;color:var(--muted)">Run batch NER or enter custom candidates above.</div>';
+      return;
+    }
+
+    const heading = document.createElement("div");
+    heading.className = "rd-text-heading";
+    heading.textContent = `Candidates (${data.total_candidates_checked} checked, ${(data.candidates || []).length} fit width)`;
+    candEl.appendChild(heading);
+
+    const table = document.createElement("table");
+    table.className = "rd-cand-table";
+
+    const thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>Candidate</th><th>Score</th><th>Width</th><th>NLP</th><th>Leak</th><th>Freq</th></tr>";
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    const maxScore = allCands.length ? Math.max(...allCands.map((c) => c.score), 0.01) : 1;
+
+    allCands.slice(0, 30).forEach((c) => {
+      const tr = document.createElement("tr");
+      const barW = Math.round((c.score / maxScore) * 60);
+      tr.innerHTML =
+        `<td>${escapeHtml(c.text)}</td>` +
+        `<td class="rd-cand-score"><span class="rd-cand-bar" style="width:${barW}px"></span>${c.score}</td>` +
+        `<td>${c.width_fit > 0 ? c.width_ratio + "x" : "<span style='color:var(--muted)'>—</span>"}</td>` +
+        `<td>${c.nlp_score}</td>` +
+        `<td>${c.leakage_score}</td>` +
+        `<td>${c.corpus_freq}${c.in_same_doc ? " *" : ""}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    candEl.appendChild(table);
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
 // Event listeners
 // ---------------------------------------------------------------------------
 
@@ -604,6 +780,17 @@ if (fontOpacityInput) fontOpacityInput.addEventListener("input", updateFontOpaci
 
 const identifyFontBtn = document.getElementById("rdIdentifyFont");
 if (identifyFontBtn) identifyFontBtn.addEventListener("click", runFontIdentify);
+
+const identifyTextBtn = document.getElementById("rdIdentifyText");
+if (identifyTextBtn) identifyTextBtn.addEventListener("click", () => runTextIdentify());
+
+const customCandBtn = document.getElementById("rdCustomCandidatesBtn");
+if (customCandBtn) customCandBtn.addEventListener("click", () => runTextIdentify());
+
+const customCandInput = document.getElementById("rdCustomCandidates");
+if (customCandInput) customCandInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") runTextIdentify();
+});
 
 // ---------------------------------------------------------------------------
 // Zoom slider

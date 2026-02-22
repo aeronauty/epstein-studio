@@ -116,3 +116,89 @@ class RedactionRecord(models.Model):
 
     def __str__(self) -> str:
         return f"Redaction {self.redaction_index} on page {self.page_num} of {self.extracted_document_id}"
+
+
+# ---------------------------------------------------------------------------
+# NER entity extraction models
+# ---------------------------------------------------------------------------
+
+class DocumentEntity(models.Model):
+    """A named entity extracted from a document via NER."""
+    ENTITY_TYPES = [
+        ("PERSON", "Person"),
+        ("ORG", "Organization"),
+        ("GPE", "Geopolitical Entity"),
+        ("LOC", "Location"),
+        ("DATE", "Date"),
+        ("NORP", "Nationality/Group"),
+        ("FAC", "Facility"),
+        ("EVENT", "Event"),
+        ("LAW", "Law/Legal"),
+        ("MONEY", "Money"),
+        ("OTHER", "Other"),
+    ]
+
+    extracted_document = models.ForeignKey(
+        ExtractedDocument, on_delete=models.CASCADE, related_name="entities"
+    )
+    entity_text = models.CharField(max_length=512, db_index=True)
+    entity_type = models.CharField(max_length=16, choices=ENTITY_TYPES, db_index=True)
+    page_num = models.IntegerField()
+    count = models.IntegerField(default=1)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["entity_type", "entity_text"]),
+            models.Index(fields=["extracted_document", "entity_type"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.entity_type}: {self.entity_text} ({self.extracted_document_id} p{self.page_num})"
+
+
+class CandidateList(models.Model):
+    """A user-provided list of candidate words/names for redaction matching."""
+    name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    entries = models.JSONField(default=list, help_text="List of candidate strings")
+
+
+class RedactionCandidate(models.Model):
+    """A candidate text match for a specific redaction, produced by batch analysis."""
+    redaction = models.ForeignKey(
+        RedactionRecord, on_delete=models.CASCADE, related_name="candidates"
+    )
+    candidate_text = models.CharField(max_length=512)
+    total_score = models.FloatField(db_index=True)
+    width_fit = models.FloatField(default=0)
+    nlp_score = models.FloatField(default=0)
+    leakage_score = models.FloatField(default=0)
+    corpus_freq = models.FloatField(default=0)
+    doc_freq = models.FloatField(default=0)
+    width_ratio = models.FloatField(default=0, help_text="candidate_width / redaction_width")
+    rank = models.IntegerField(default=0, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["redaction", "rank"]),
+            models.Index(fields=["candidate_text"]),
+        ]
+        ordering = ["redaction", "rank"]
+
+    def __str__(self):
+        return f"#{self.rank} '{self.candidate_text}' ({self.total_score:.3f}) for {self.redaction_id}"
+
+
+class BatchRun(models.Model):
+    """Tracks a batch candidate matching run."""
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    total_redactions = models.IntegerField(default=0)
+    processed = models.IntegerField(default=0)
+    total_matches = models.IntegerField(default=0)
+    status = models.CharField(max_length=16, default="running")
+    font_identified_count = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"BatchRun #{self.pk} ({self.status}) — {self.processed}/{self.total_redactions}"

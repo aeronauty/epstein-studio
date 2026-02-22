@@ -20,6 +20,7 @@ Operational instructions for coding agents working in this repository.
 - `docs/deploy.md`: production deployment and update flow.
 - `docs/architecture.md`: system structure and data flow.
 - `docs/operations.md`: maintenance and troubleshooting playbooks.
+- `docs-site/`: Docusaurus documentation site (build with `cd docs-site && npm run build`). Pages under `docs-site/docs/` mirror and extend the markdown docs above.
 
 ## Working Rules
 - Keep changes focused and minimal.

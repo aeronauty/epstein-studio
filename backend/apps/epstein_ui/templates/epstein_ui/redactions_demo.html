@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Redaction Demo - Epstein Studio</title>
     <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
-    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=7" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=8" />
   </head>
   <body>
     <div class="page rd-page">
@@ -17,6 +17,9 @@
           </div>
           <div class="topbar-actions">
             <a class="btn btn-secondary active" href="/redactions-demo/">Redactions</a>
+            <a class="btn btn-secondary" href="/entities/">Entities</a>
+            <a class="btn btn-secondary" href="/matches/">Matches</a>
+            <a class="btn btn-outline" href="/docs/">Docs</a>
           </div>
         </div>
       </header>
@@ -83,6 +86,8 @@
               </label>
               <span class="rd-zoom-sep"></span>
               <button id="rdIdentifyFont" class="btn btn-secondary" type="button">Identify Font</button>
+              <span class="rd-zoom-sep"></span>
+              <button id="rdIdentifyText" class="btn btn-secondary" type="button">Identify Text</button>
             </div>
             <div id="rdViewer" class="rd-viewer">
               <div id="rdViewerInner" class="rd-viewer-inner">
@@ -93,6 +98,15 @@
             <div id="rdFontSummary" class="rd-font-summary hidden"></div>
             <div id="rdOptProgress" class="rd-opt-progress hidden"></div>
             <div id="rdOptResults" class="rd-opt-results hidden"></div>
+            <div id="rdTextResults" class="rd-text-results hidden">
+              <div id="rdTextGap" class="rd-text-section"></div>
+              <div id="rdTextLeakage" class="rd-text-section"></div>
+              <div class="rd-text-candidates-input">
+                <input id="rdCustomCandidates" type="text" placeholder="Enter candidate names (comma-separated)..." />
+                <button id="rdCustomCandidatesBtn" class="btn btn-secondary" type="button">Score</button>
+              </div>
+              <div id="rdTextCandidates" class="rd-text-section"></div>
+            </div>
             <div class="rd-detail-info">
               <div class="rd-detail-section">
                 <div class="rd-detail-label">Text Before</div>
@@ -108,6 +122,6 @@
         </div>
       </div>
     </div>
-    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=9"></script>
+    <script src="{% static 'epstein_ui/redactions_demo.js' %}?v=10"></script>
   </body>
 </html>

@@ -45,6 +45,11 @@ results/
 # Tool-generated output
 tools/*/output/
 
+# Docusaurus
+docs-site/node_modules/
+docs-site/build/
+docs-site/.docusaurus/
+
 # Environment
 .env
 .env.*
@@ -55,6 +60,9 @@ tools/*/output/
 # OS
 .DS_Store
 Thumbs.db
+
+# Docusaurus docs site (generated)
+docs-site/
 
 # Editors / IDEs
 .cursor/

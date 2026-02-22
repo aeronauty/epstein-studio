@@ -1,0 +1,85 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Candidate Matches - Epstein Studio</title>
+    <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=12" />
+  </head>
+  <body>
+    <div class="page mat-page">
+      <header class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-left">
+            <a href="/" class="brand">Epstein Studio</a>
+          </div>
+          <div class="topbar-actions">
+            <a class="btn btn-secondary" href="/redactions-demo/">Redactions</a>
+            <a class="btn btn-secondary" href="/entities/">Entities</a>
+            <a class="btn btn-secondary active" href="/matches/">Matches</a>
+            <a class="btn btn-outline" href="/docs/">Docs</a>
+          </div>
+        </div>
+      </header>
+
+      <main class="mat-layout">
+        <div class="mat-header">
+          <h1>Candidate Matches</h1>
+          <p class="mat-subtitle">
+            {{ total_matches }} candidate matches across {{ redactions_with_matches }} redactions
+            {% if latest_batch %}
+              &middot; Last batch: {{ latest_batch.status }}
+              ({{ latest_batch.processed }}/{{ latest_batch.total_redactions }})
+            {% endif %}
+          </p>
+        </div>
+
+        <div class="mat-tabs">
+          <button class="mat-tab active" data-tab="results">All Matches</button>
+          <button class="mat-tab" data-tab="topnames">Top Names</button>
+        </div>
+
+        <!-- Results tab -->
+        <div id="tabResults" class="mat-tab-panel">
+          <div class="mat-controls">
+            <div class="mat-search-row">
+              <input type="text" id="matSearch" class="mat-search" placeholder="Search candidate text..." autocomplete="off" />
+              <input type="text" id="matDocFilter" class="mat-doc-filter" placeholder="Filter by doc ID..." autocomplete="off" />
+              <select id="matSort" class="mat-sort-select">
+                <option value="score">Highest score</option>
+                <option value="score_asc">Lowest score</option>
+                <option value="candidates">Most candidates</option>
+                <option value="width">Widest redaction</option>
+                <option value="width_asc">Narrowest redaction</option>
+                <option value="doc">By document</option>
+              </select>
+              <label class="mat-score-label">
+                Min score
+                <input type="number" id="matMinScore" class="mat-score-input" value="0" min="0" max="1" step="0.05" />
+              </label>
+            </div>
+          </div>
+
+          <div id="matResults"></div>
+          <div id="matLoading" class="mat-loading">Loading...</div>
+          <div id="matEmpty" class="mat-empty" style="display:none">No matches found.</div>
+
+          <div class="mat-pager" id="matPager">
+            <button id="matPrev" class="btn btn-secondary btn-sm" disabled>&laquo; Prev</button>
+            <span id="matPageInfo" class="mat-page-info">Page 1</span>
+            <button id="matNext" class="btn btn-secondary btn-sm" disabled>Next &raquo;</button>
+          </div>
+        </div>
+
+        <!-- Top names tab -->
+        <div id="tabTopnames" class="mat-tab-panel" style="display:none">
+          <div id="matTopNames"></div>
+        </div>
+      </main>
+    </div>
+
+    <script src="{% static 'epstein_ui/matches.js' %}?v=3"></script>
+  </body>
+</html>

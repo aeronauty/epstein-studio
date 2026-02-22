@@ -1,26 +1,24 @@
 # Epstein Studio
 
-A collaborative workspace for annotating, discussing, and investigating redacted PDF documents. Built for the crowd-sourced effort to dig through the Epstein files.
+An open-source toolkit for extracting, analysing, and de-redacting court documents from the Epstein case files. Uses computer vision, font fingerprinting, and NLP to identify what lies beneath the black bars.
 
-**Live at [epstein-studio.com](https://epstein-studio.com)**
+**Live at [epstein-studio.com](https://epstein-studio.com)** | **[Documentation](https://epstein-studio.com/docs/)**
 
 ---
 
 ## What Is This
 
-Epstein Studio renders PDF pages in the browser and lets users pin annotations directly onto the documents. Each annotation can include notes, styled text overlays, and arrow hints. Every annotation has its own discussion thread with voting, so the community can highlight what matters and surface the most promising findings.
+Epstein Studio processes thousands of redacted PDF court documents through an automated pipeline that detects redaction bars (via PyMuPDF and OpenCV), extracts named entities with spaCy NER, and scores candidate texts that could fit under each redaction using font-width analysis, ascender/descender leakage detection, and contextual NLP.
 
 ### Features
 
-- **PDF Viewer** -- Pan, zoom, and navigate multi-page PDFs rendered as images
-- **Annotations** -- Place anchor points on any page with notes, text overlays, and directional arrows
-- **Text Overlays** -- Custom font, size, color, and opacity for marking up redacted or important sections
-- **Arrow Hints** -- Draw arrows to point out connections or areas of interest
-- **Discussions** -- Threaded comments on both annotations and entire PDFs
-- **Voting** -- Upvote/downvote annotations and PDFs to surface the most promising leads
-- **Search & Browse** -- Full-text search with autocomplete, sortable browse grid, random file picker
-- **Notifications** -- Get notified when someone replies to your comments
-- **Heatmap** -- Visual density overlay showing where annotations cluster on a page
+- **Redaction Extraction** -- Detect redaction bars using PyMuPDF metadata and OpenCV pixel analysis, with confidence scoring and multiline grouping
+- **Interactive Redaction Viewer** -- Browse redactions in a grid, zoom/pan page images, inspect redaction context (text before/after)
+- **Font Analysis** -- Overlay text spans from the surrounding PDF, identify the font via per-character width fingerprinting (RMSE matching against candidate fonts)
+- **Text Identification** -- Predict gap type (name, date, location, etc.) from context, filter candidates by rendered width, score by leakage letterform analysis, NLP plausibility, and corpus frequency
+- **Named Entity Browser** -- Browse all entities extracted from the documents via spaCy NER, filtered by type (PERSON, ORG, GPE, etc.)
+- **Candidate List Management** -- Import candidate names from the Epstein Exposed API, Black Book contacts, and curated lists; or add custom lists via the UI
+- **Batch Matching** -- Run candidate scoring across all redactions with font identification, width filtering, and multi-signal scoring; results browseable with ranked candidates per redaction
 
 ---
 
@@ -30,10 +28,11 @@ Epstein Studio renders PDF pages in the browser and lets users pin annotations d
 |-------|------|
 | Backend | Django 5.2 |
 | Database | PostgreSQL 16 |
-| PDF Rendering | poppler-utils (pdftoppm) |
+| PDF Rendering | poppler-utils (pdftoppm), PyMuPDF |
 | OCR | Tesseract |
+| NLP | spaCy (en_core_web_lg) |
 | Server | Gunicorn |
-| Frontend | Vanilla JS, SVG canvas |
+| Frontend | Vanilla JS, server-rendered templates |
 | Package Manager | uv |
 | Deployment | Docker Compose |
 
@@ -60,14 +59,29 @@ uv sync
 # set up your environment
 cp .env.example .env  # then edit with your DB credentials
 
+# download the spaCy model
+uv run python -m spacy download en_core_web_lg
+
 # run migrations
 uv run python backend/manage.py migrate
 
-# index PDF files (point DATA_DIR to your PDF directory)
-uv run python backend/manage.py index_pdfs
-
 # start the dev server
 uv run python backend/manage.py runserver
+```
+
+### Analysis Pipeline
+
+After the server is running and extraction data has been imported:
+
+```bash
+# extract named entities from documents (requires a completed extraction run)
+uv run python backend/manage.py extract_entities
+
+# load candidate name lists from external sources
+uv run python backend/manage.py load_candidates --fetch
+
+# run batch candidate matching across all redactions
+uv run python backend/manage.py match_candidates
 ```
 
 ### Docker
@@ -77,10 +91,10 @@ uv run python backend/manage.py runserver
 docker compose up --build
 
 # run migrations inside the container
-docker compose exec web uv run python manage.py migrate
+docker compose exec web uv run python backend/manage.py migrate
 
-# index PDFs
-docker compose exec web uv run python manage.py index_pdfs
+# download spaCy model
+docker compose exec web uv run python -m spacy download en_core_web_lg
 ```
 
 ### Environment Variables
@@ -102,21 +116,32 @@ docker compose exec web uv run python manage.py index_pdfs
 ## Project Structure
 
 ```
-epstein/
+epstein-studio/
 ├── backend/
 │   ├── manage.py
-│   ├── backend/              # Django project config
+│   ├── backend/                    # Django project config
 │   │   ├── settings.py
 │   │   ├── urls.py
 │   │   └── wsgi.py
 │   ├── apps/
-│   │   └── epstein_ui/       # Main application
-│   │       ├── models.py     # Annotations, votes, comments, notifications
-│   │       ├── views.py      # API endpoints and page views
-│   │       ├── templates/    # HTML templates
-│   │       └── static/       # JS, CSS, fonts, icons
+│   │   └── epstein_ui/            # Main application
+│   │       ├── models.py          # Extraction runs, redactions, entities, candidates
+│   │       ├── views.py           # Page views and JSON API endpoints
+│   │       ├── urls.py            # URL routing
+│   │       ├── templates/         # start, redactions_demo, entities, matches
+│   │       ├── static/            # style.css, redactions_demo.js, entities.js, matches.js
+│   │       └── management/commands/
+│   │           ├── extract_entities.py
+│   │           ├── load_candidates.py
+│   │           └── match_candidates.py
 │   └── email_header_extractor/
-│       └── extract_headers.py  # OCR-based email header extraction utility
+│       └── extract_headers.py     # OCR-based email header extraction utility
+├── tools/
+│   └── redaction_extractor/       # Standalone redaction detection pipeline
+│       ├── extract.py
+│       └── redaction_extractor/   # Detection, merging, leakage, image cropping
+├── docs-site/                     # Docusaurus documentation site
+├── docs/                          # Markdown docs (source for Docusaurus)
 ├── pyproject.toml
 ├── uv.lock
 ├── Dockerfile

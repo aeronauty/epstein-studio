@@ -12,6 +12,10 @@ from .models import (
     ExtractionRun,
     ExtractedDocument,
     RedactionRecord,
+    DocumentEntity,
+    CandidateList,
+    RedactionCandidate,
+    BatchRun,
 )
 
 
@@ -27,6 +31,272 @@ def start_page(request):
     return render(request, "epstein_ui/start.html", {
         "total_pdfs": total_pdfs,
         "total_redactions": total_redactions,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Entity browser views
+# ---------------------------------------------------------------------------
+
+def entities_page(request):
+    """Render the entity browser page."""
+    try:
+        total_entities = DocumentEntity.objects.count()
+        total_people = DocumentEntity.objects.filter(entity_type="PERSON").values("entity_text").distinct().count()
+        total_candidates = sum(
+            len(cl.entries or []) for cl in CandidateList.objects.all()
+        )
+    except (OperationalError, ProgrammingError):
+        total_entities = 0
+        total_people = 0
+        total_candidates = 0
+    return render(request, "epstein_ui/entities.html", {
+        "total_entities": total_entities,
+        "total_people": total_people,
+        "total_candidates": total_candidates,
+    })
+
+
+def entities_list(request):
+    """Return paginated entity records as JSON with aggregation."""
+    from django.db.models import Sum, Count
+
+    try:
+        page_num = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page_num = 1
+    page_size = 50
+    query = (request.GET.get("q") or "").strip()
+    type_filter = (request.GET.get("type") or "").strip().upper()
+    doc_filter = request.GET.get("doc_id", "").strip()
+    sort = (request.GET.get("sort") or "frequency").lower()
+
+    qs = DocumentEntity.objects.values("entity_text", "entity_type").annotate(
+        total_count=Sum("count"),
+        doc_count=Count("extracted_document", distinct=True),
+    )
+
+    if query:
+        qs = qs.filter(entity_text__icontains=query)
+    if type_filter:
+        qs = qs.filter(entity_type=type_filter)
+    if doc_filter:
+        qs = qs.filter(extracted_document__doc_id=doc_filter)
+
+    sort_map = {
+        "frequency": "-total_count",
+        "frequency_asc": "total_count",
+        "alpha": "entity_text",
+        "alpha_desc": "-entity_text",
+        "docs": "-doc_count",
+        "type": "entity_type",
+    }
+    qs = qs.order_by(sort_map.get(sort, "-total_count"))
+
+    total = qs.count()
+    start = (page_num - 1) * page_size
+    end = start + page_size
+    records = list(qs[start:end])
+
+    type_counts = {}
+    try:
+        for row in DocumentEntity.objects.values("entity_type").annotate(n=Count("entity_text", distinct=True)):
+            type_counts[row["entity_type"]] = row["n"]
+    except Exception:
+        pass
+
+    return JsonResponse({
+        "items": records,
+        "total": total,
+        "page": page_num,
+        "has_more": end < total,
+        "type_counts": type_counts,
+    })
+
+
+def entity_detail(request, entity_text):
+    """Return all occurrences of a specific entity across documents."""
+    records = list(
+        DocumentEntity.objects.filter(entity_text=entity_text)
+        .select_related("extracted_document")
+        .order_by("-count")
+        .values(
+            "entity_text", "entity_type", "page_num", "count",
+            "extracted_document__doc_id",
+        )[:200]
+    )
+    return JsonResponse({
+        "entity_text": entity_text,
+        "occurrences": records,
+        "total": len(records),
+    })
+
+
+def candidate_lists(request):
+    """List all candidate lists, or create a new one (POST)."""
+    import json as _json
+
+    if request.method == "POST":
+        try:
+            body = _json.loads(request.body)
+        except Exception:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        name = (body.get("name") or "").strip()
+        entries = body.get("entries", [])
+        if not name:
+            return JsonResponse({"error": "Name required"}, status=400)
+        entries = [e.strip() for e in entries if isinstance(e, str) and e.strip()]
+        if not entries:
+            return JsonResponse({"error": "At least one entry required"}, status=400)
+        obj, created = CandidateList.objects.update_or_create(
+            name=name, defaults={"entries": entries},
+        )
+        return JsonResponse({
+            "id": obj.pk, "name": obj.name,
+            "count": len(obj.entries), "created": created,
+        })
+
+    records = []
+    for cl in CandidateList.objects.order_by("name"):
+        records.append({
+            "id": cl.pk,
+            "name": cl.name,
+            "count": len(cl.entries or []),
+            "entries": cl.entries or [],
+        })
+    return JsonResponse({"lists": records, "total": len(records)})
+
+
+def candidate_list_delete(request, pk):
+    """Delete a candidate list."""
+    if request.method != "DELETE":
+        return JsonResponse({"error": "DELETE only"}, status=405)
+    try:
+        cl = CandidateList.objects.get(pk=pk)
+    except CandidateList.DoesNotExist:
+        return JsonResponse({"error": "Not found"}, status=404)
+    cl.delete()
+    return JsonResponse({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Candidate matches browser
+# ---------------------------------------------------------------------------
+
+def matches_page(request):
+    """Render the candidate matches browser page."""
+    try:
+        total_matches = RedactionCandidate.objects.count()
+        redactions_with_matches = RedactionCandidate.objects.values(
+            "redaction"
+        ).distinct().count()
+        latest_batch = BatchRun.objects.order_by("-pk").first()
+    except (OperationalError, ProgrammingError):
+        total_matches = 0
+        redactions_with_matches = 0
+        latest_batch = None
+    return render(request, "epstein_ui/matches.html", {
+        "total_matches": total_matches,
+        "redactions_with_matches": redactions_with_matches,
+        "latest_batch": latest_batch,
+    })
+
+
+def matches_list(request):
+    """Return paginated candidate matches as JSON, grouped by redaction."""
+    from django.db.models import Max, Count
+
+    try:
+        page_num = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page_num = 1
+    page_size = 30
+    query = (request.GET.get("q") or "").strip()
+    doc_filter = (request.GET.get("doc") or "").strip()
+    min_score = float(request.GET.get("min_score", 0))
+
+    sort = (request.GET.get("sort") or "score").lower()
+
+    qs = RedactionRecord.objects.filter(
+        candidates__isnull=False
+    ).distinct().select_related("extracted_document").annotate(
+        top_score=Max("candidates__total_score"),
+        match_count=Count("candidates"),
+    )
+
+    if doc_filter:
+        qs = qs.filter(extracted_document__doc_id__icontains=doc_filter)
+    if min_score > 0:
+        qs = qs.filter(top_score__gte=min_score)
+    if query:
+        qs = qs.filter(candidates__candidate_text__icontains=query).distinct()
+
+    sort_map = {
+        "score": "-top_score",
+        "score_asc": "top_score",
+        "candidates": "-match_count",
+        "width": "-width_points",
+        "width_asc": "width_points",
+        "doc": "extracted_document__doc_id",
+        "page": "extracted_document__doc_id",
+    }
+    qs = qs.order_by(sort_map.get(sort, "-top_score"))
+
+    total = qs.count()
+    start = (page_num - 1) * page_size
+    redactions_page = list(qs[start:start + page_size])
+
+    items = []
+    for r in redactions_page:
+        top_candidates = list(
+            RedactionCandidate.objects.filter(redaction=r)
+            .order_by("rank")[:10]
+            .values("candidate_text", "total_score", "width_fit",
+                    "nlp_score", "leakage_score", "width_ratio", "rank")
+        )
+        items.append({
+            "redaction_id": r.pk,
+            "doc_id": r.extracted_document.doc_id,
+            "page_num": r.page_num,
+            "redaction_index": r.redaction_index,
+            "text_before": (r.text_before or "")[-60:],
+            "text_after": (r.text_after or "")[:60],
+            "width_pt": round(r.width_points, 1),
+            "estimated_chars": r.estimated_chars,
+            "has_leakage": r.has_ascender_leakage or r.has_descender_leakage,
+            "top_score": round(r.top_score, 3) if r.top_score else 0,
+            "match_count": r.match_count,
+            "candidates": top_candidates,
+            "image_context": r.image_context or "",
+        })
+
+    return JsonResponse({
+        "items": items,
+        "total": total,
+        "page": page_num,
+        "has_more": (start + page_size) < total,
+    })
+
+
+def matches_stats(request):
+    """Summary stats for the matches browser."""
+    from django.db.models import Avg, Max, Count
+
+    top_candidates = list(
+        RedactionCandidate.objects.values("candidate_text")
+        .annotate(
+            appearances=Count("id"),
+            avg_score=Avg("total_score"),
+            best_score=Max("total_score"),
+        )
+        .order_by("-appearances")[:30]
+    )
+    for c in top_candidates:
+        c["avg_score"] = round(c["avg_score"], 3)
+        c["best_score"] = round(c["best_score"], 3)
+
+    return JsonResponse({
+        "top_candidates": top_candidates,
     })
 
 
@@ -744,6 +1014,716 @@ def redaction_font_optimize(request, pk):
         "candidates": all_candidates,
         "all_optimized": results,
         "profile_chars": len(profile),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Text candidate identification
+# ---------------------------------------------------------------------------
+
+_nlp_cache = {}
+
+
+def _get_nlp():
+    """Lazy-load spaCy model (cached)."""
+    if "nlp" not in _nlp_cache:
+        import spacy
+        try:
+            _nlp_cache["nlp"] = spacy.load("en_core_web_lg", disable=["lemmatizer"])
+        except OSError:
+            _nlp_cache["nlp"] = spacy.load("en_core_web_sm", disable=["lemmatizer"])
+    return _nlp_cache["nlp"]
+
+
+# -- Phase 3a: Gap type prediction from context --
+
+GAP_PATTERNS = [
+    (r"(?:Mr|Mrs|Ms|Miss|Dr|Prof|Rev|Sir|Lord|Lady|Judge|Sen|Rep)\.?\s*$",
+     "PERSON", 0.95, "Title prefix → surname"),
+    (r"(?:named|called|known as)\s+$",
+     "PERSON", 0.85, "Naming construction → person/entity name"),
+    (r"(?:told|said|asked|wrote|stated|testified|replied)\s+",
+     "PERSON", 0.70, "Speech verb after gap → speaker name"),
+    (r"^\s*(?:said|told|asked|wrote|stated|testified|replied|denied|confirmed)",
+     "PERSON", 0.75, "Gap before speech verb → speaker name"),
+    (r"(?:in|at|from|near|to)\s+$",
+     "GPE", 0.50, "Preposition → place name"),
+    (r"(?:on|dated?|from)\s+(?:\w+\s+)?\d",
+     "DATE", 0.60, "Date pattern context"),
+    (r"(?:the|a|an)\s+$",
+     "ORG", 0.30, "Article → noun/org"),
+    (r"\$\s*$",
+     "MONEY", 0.80, "Dollar sign → monetary amount"),
+]
+
+
+def _predict_gap_type(text_before, text_after):
+    """Predict likely entity types for the redacted gap using patterns and spaCy."""
+    import re
+
+    predictions = []
+    before = (text_before or "").strip()
+    after = (text_after or "").strip()
+
+    for pattern, etype, confidence, reason in GAP_PATTERNS:
+        if pattern.startswith("^"):
+            if re.search(pattern, after, re.IGNORECASE):
+                predictions.append({
+                    "entity_type": etype,
+                    "confidence": confidence,
+                    "reason": reason,
+                    "source": "pattern",
+                })
+        else:
+            if re.search(pattern, before, re.IGNORECASE):
+                predictions.append({
+                    "entity_type": etype,
+                    "confidence": confidence,
+                    "reason": reason,
+                    "source": "pattern",
+                })
+
+    nlp = _get_nlp()
+    combined = f"{before} XXXREDACTEDXXX {after}"
+    doc = nlp(combined)
+
+    for ent in doc.ents:
+        if "XXXREDACTEDXXX" in ent.text:
+            predictions.append({
+                "entity_type": ent.label_,
+                "confidence": 0.50,
+                "reason": f"spaCy recognized gap region as {ent.label_}",
+                "source": "spacy_ner",
+            })
+
+    for token in doc:
+        if token.text == "XXXREDACTEDXXX":
+            dep = token.dep_
+            head_text = token.head.text
+            pos_hint = None
+            if dep in ("nsubj", "nsubjpass"):
+                pos_hint = ("PERSON", 0.55, f"Gap is subject of '{head_text}'")
+            elif dep in ("dobj", "pobj"):
+                pos_hint = ("PERSON", 0.40, f"Gap is object of '{head_text}'")
+            elif dep == "attr":
+                pos_hint = ("ORG", 0.35, f"Gap is attribute")
+            elif dep == "appos":
+                pos_hint = ("PERSON", 0.50, f"Gap in apposition")
+            if pos_hint:
+                predictions.append({
+                    "entity_type": pos_hint[0],
+                    "confidence": pos_hint[1],
+                    "reason": pos_hint[2],
+                    "source": "spacy_dep",
+                })
+            break
+
+    type_scores = {}
+    for p in predictions:
+        t = p["entity_type"]
+        if t not in type_scores or p["confidence"] > type_scores[t]["confidence"]:
+            type_scores[t] = p
+
+    result = sorted(type_scores.values(), key=lambda x: -x["confidence"])
+    return result
+
+
+# -- Phase 3b: Width constraint filtering --
+
+def _compute_candidate_width_pt(text, font_obj, scale_x=1.0,
+                                letter_spacing_norm=0.0, word_spacing_norm=0.0,
+                                profile=None):
+    """Compute the width of a text string in normalised units (at 1pt).
+
+    When *profile* is provided (the measured per-character advance widths from
+    the PDF), characters present in the profile use the PDF's own advance values
+    rather than the font file.  This is more accurate because it captures the
+    exact rendering parameters (tracking, hinting, CIDFont differences) that the
+    original PDF producer used.
+    """
+    total = 0.0
+    for ch in text:
+        if profile and ch in profile:
+            total += profile[ch]
+        else:
+            adv = font_obj.glyph_advance(ord(ch))
+            if adv is not None and adv > 0:
+                total += adv * scale_x + letter_spacing_norm
+            else:
+                total += 0.5 * scale_x
+            if ch == " ":
+                total += word_spacing_norm
+    return total
+
+
+def _measure_precise_gap(raw_dict, scale, redaction_bbox_pt):
+    """Measure the exact gap on the redaction's line using character origins.
+
+    Returns a dict with:
+      gap_pt:        distance from right edge of last char before to origin of
+                     first char after the redaction, in PDF points.
+      char_before:   the character string immediately before the gap (e.g. "d")
+      char_after:    the character string immediately after the gap (e.g. "w")
+      needs_space_before: True if char_before is not whitespace (so a space
+                     must be prepended to the candidate).
+      needs_space_after:  True if char_after is not whitespace.
+      font_size_pt:  average font size on this line.
+    Returns None if the gap cannot be measured.
+    """
+    rx0, ry0, rx1, ry1 = redaction_bbox_pt
+    ry_center = (ry0 + ry1) / 2.0
+
+    all_chars = []
+    for block in raw_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                chars = span.get("chars")
+                if not chars:
+                    continue
+                fs = span.get("size", 12.0)
+                for ch in chars:
+                    origin = ch.get("origin")
+                    bbox = ch.get("bbox")
+                    if origin is None and bbox is not None:
+                        origin = (bbox[0], bbox[1])
+                    if origin is None:
+                        continue
+                    all_chars.append({
+                        "c": ch.get("c", ""),
+                        "x": origin[0],
+                        "y": origin[1],
+                        "fs": fs,
+                        "bbox": bbox,
+                    })
+
+    if not all_chars:
+        return None
+
+    y_tol = (ry1 - ry0) * 0.8
+    line_chars = [c for c in all_chars if abs(c["y"] - ry_center) < y_tol]
+    if not line_chars:
+        return None
+
+    line_chars.sort(key=lambda c: c["x"])
+
+    last_before = None
+    first_after = None
+    for c in line_chars:
+        cx_right = c["bbox"][2] if c["bbox"] else c["x"] + 5
+        if cx_right <= rx0 + 1:
+            last_before = c
+        elif c["x"] >= rx1 - 1 and first_after is None:
+            first_after = c
+
+    if last_before is None or first_after is None:
+        return None
+
+    last_before_right = last_before["bbox"][2] if last_before["bbox"] else last_before["x"]
+    gap_pt = first_after["x"] - last_before_right
+
+    char_b = last_before["c"]
+    char_a = first_after["c"]
+    needs_space_before = char_b.strip() != ""
+    needs_space_after = char_a.strip() != ""
+
+    avg_fs = sum(c["fs"] for c in line_chars) / len(line_chars) if line_chars else 12.0
+
+    return {
+        "gap_pt": max(0, gap_pt),
+        "char_before": char_b,
+        "char_after": char_a,
+        "needs_space_before": needs_space_before,
+        "needs_space_after": needs_space_after,
+        "font_size_pt": avg_fs,
+    }
+
+
+def _filter_by_width(candidates, redaction_width_pt, font_obj, font_size_pt,
+                     scale_x=1.0, tolerance=0.15,
+                     letter_spacing_norm=0.0, word_spacing_norm=0.0,
+                     profile=None, gap_info=None):
+    """Score candidates by how well they fit the redaction width.
+
+    When *gap_info* is provided (from ``_measure_precise_gap``), the candidate
+    is padded with spaces to match what the PDF line requires.  For example, if
+    the last visible char before the gap is "d" and the first after is "w",
+    the effective string tested is " candidate " (space + text + space) because
+    those inter-word spaces must also fit inside the measured gap.
+
+    Tolerance tightens to 3% when a precise gap is available.
+    """
+    precise = gap_info is not None
+    target_width = gap_info["gap_pt"] if precise else redaction_width_pt
+    tol = 0.03 if precise else tolerance
+
+    pad_before = ""
+    pad_after = ""
+    if precise:
+        if gap_info["needs_space_before"]:
+            pad_before = " "
+        if gap_info["needs_space_after"]:
+            pad_after = " "
+
+    results = []
+    for cand_text in candidates:
+        full_text = pad_before + cand_text + pad_after
+        width_at_1pt = _compute_candidate_width_pt(
+            full_text, font_obj, scale_x,
+            letter_spacing_norm, word_spacing_norm, profile,
+        )
+        cand_width_pt = width_at_1pt * font_size_pt
+        if target_width <= 0:
+            fit = 0.0
+        else:
+            ratio = cand_width_pt / target_width
+            if abs(ratio - 1.0) <= tol:
+                fit = 1.0 - abs(ratio - 1.0) / tol
+            else:
+                fit = 0.0
+        results.append({
+            "text": cand_text,
+            "width_pt": round(cand_width_pt, 2),
+            "width_ratio": round(cand_width_pt / max(target_width, 0.01), 3),
+            "width_fit": round(fit, 3),
+        })
+    return results
+
+
+# -- Phase 4: Enhanced leakage letterform identification --
+
+ASCENDER_LETTERS = set("bdfhkltBDFHKLTAEGIJMNPQRSUVWXYZ0123456789")
+DESCENDER_LETTERS = set("gjpqyQJ")
+
+
+def _analyze_leakage_letterforms(page_pixmap_path, redaction_bbox_px, font_size_px, dpi):
+    """Analyze pixel bands above/below redaction for leaked letterform fragments."""
+    import numpy as np
+    from PIL import Image
+
+    try:
+        img = Image.open(str(page_pixmap_path)).convert("L")
+    except Exception:
+        return {"ascender_fragments": [], "descender_fragments": []}
+
+    img_array = np.array(img)
+    h, w = img_array.shape
+    x0, y0, x1, y1 = [int(v) for v in redaction_bbox_px]
+
+    ascender_band_h = max(2, int(font_size_px * 0.35))
+    descender_band_h = max(2, int(font_size_px * 0.25))
+
+    results = {"ascender_fragments": [], "descender_fragments": []}
+
+    band_top_y0 = max(0, y0 - ascender_band_h)
+    band_top_y1 = y0
+    if band_top_y1 > band_top_y0 and x1 > x0:
+        band = img_array[band_top_y0:band_top_y1, x0:x1]
+        fragments = _find_dark_fragments(band, x0, font_size_px)
+        results["ascender_fragments"] = fragments
+
+    band_bot_y0 = y1
+    band_bot_y1 = min(h, y1 + descender_band_h)
+    if band_bot_y1 > band_bot_y0 and x1 > x0:
+        band = img_array[band_bot_y0:band_bot_y1, x0:x1]
+        fragments = _find_dark_fragments(band, x0, font_size_px)
+        results["descender_fragments"] = fragments
+
+    return results
+
+
+def _find_dark_fragments(band, x_offset, font_size_px):
+    """Find connected dark pixel regions in a grayscale band image.
+    Returns list of {x_start, x_end, position_estimate, width_px, pixel_density}."""
+    import numpy as np
+
+    if band.size == 0:
+        return []
+
+    threshold = 180
+    dark_mask = band < threshold
+
+    col_has_dark = np.any(dark_mask, axis=0)
+    fragments = []
+    in_fragment = False
+    frag_start = 0
+
+    for col_idx in range(len(col_has_dark)):
+        if col_has_dark[col_idx]:
+            if not in_fragment:
+                frag_start = col_idx
+                in_fragment = True
+        else:
+            if in_fragment:
+                frag_width = col_idx - frag_start
+                if frag_width >= 2:
+                    frag_region = dark_mask[:, frag_start:col_idx]
+                    density = float(np.sum(frag_region)) / max(frag_region.size, 1)
+                    avg_char_w = max(font_size_px * 0.5, 1)
+                    position = (frag_start + frag_width / 2) / avg_char_w
+
+                    fragments.append({
+                        "x_start": frag_start + x_offset,
+                        "x_end": col_idx + x_offset,
+                        "width_px": frag_width,
+                        "pixel_density": round(density, 3),
+                        "position_estimate": round(position, 1),
+                    })
+                in_fragment = False
+
+    if in_fragment:
+        col_idx = len(col_has_dark)
+        frag_width = col_idx - frag_start
+        if frag_width >= 2:
+            frag_region = dark_mask[:, frag_start:col_idx]
+            density = float(np.sum(frag_region)) / max(frag_region.size, 1)
+            avg_char_w = max(font_size_px * 0.5, 1)
+            position = (frag_start + frag_width / 2) / avg_char_w
+            fragments.append({
+                "x_start": frag_start + x_offset,
+                "x_end": col_idx + x_offset,
+                "width_px": frag_width,
+                "pixel_density": round(density, 3),
+                "position_estimate": round(position, 1),
+            })
+
+    return fragments
+
+
+def _match_leakage_to_candidates(leakage_data, candidate_text, font_size_px):
+    """Score how well a candidate's letter positions match observed leakage fragments."""
+    asc_frags = leakage_data.get("ascender_fragments", [])
+    desc_frags = leakage_data.get("descender_fragments", [])
+
+    if not asc_frags and not desc_frags:
+        return 0.5
+
+    avg_char_w = max(font_size_px * 0.5, 1)
+    score = 0.0
+    checks = 0
+
+    for frag in asc_frags:
+        pos = frag["position_estimate"]
+        char_idx = int(round(pos))
+        if 0 <= char_idx < len(candidate_text):
+            ch = candidate_text[char_idx]
+            if ch in ASCENDER_LETTERS:
+                score += 1.0
+            else:
+                score -= 0.5
+            checks += 1
+        elif char_idx < len(candidate_text):
+            checks += 1
+
+    for frag in desc_frags:
+        pos = frag["position_estimate"]
+        char_idx = int(round(pos))
+        if 0 <= char_idx < len(candidate_text):
+            ch = candidate_text[char_idx]
+            if ch in DESCENDER_LETTERS:
+                score += 1.0
+            else:
+                score -= 0.5
+            checks += 1
+
+    if not asc_frags:
+        has_ascender = any(ch in ASCENDER_LETTERS for ch in candidate_text if ch.isalpha())
+        if not has_ascender:
+            score += 0.3
+            checks += 1
+
+    if not desc_frags:
+        has_descender = any(ch in DESCENDER_LETTERS for ch in candidate_text)
+        if not has_descender:
+            score += 0.3
+            checks += 1
+
+    return max(0.0, min(1.0, score / max(checks, 1)))
+
+
+# -- Phase 5: Scoring --
+
+def _score_candidates(width_results, gap_predictions, leakage_data,
+                      font_size_px, doc_record, corpus_entities):
+    """Combine all signals into ranked candidate scores."""
+    predicted_types = {p["entity_type"]: p["confidence"] for p in gap_predictions}
+
+    corpus_freq_map = {}
+    max_freq = 1
+    for ent in corpus_entities:
+        freq = corpus_freq_map.get(ent["entity_text"], 0) + ent["count"]
+        corpus_freq_map[ent["entity_text"]] = freq
+        max_freq = max(max_freq, freq)
+
+    doc_entity_set = set()
+    for ent in corpus_entities:
+        if ent.get("doc_id") == (doc_record.pk if doc_record else None):
+            doc_entity_set.add(ent["entity_text"])
+
+    scored = []
+    for wr in width_results:
+        text = wr["text"]
+        width_fit = wr["width_fit"]
+
+        nlp_score = 0.0
+        ent_info = corpus_entities_by_text(corpus_entities, text)
+        if ent_info:
+            for etype in ent_info.get("types", []):
+                if etype in predicted_types:
+                    nlp_score = max(nlp_score, predicted_types[etype])
+
+        leakage_score = _match_leakage_to_candidates(
+            leakage_data, text, font_size_px
+        )
+
+        corpus_freq = corpus_freq_map.get(text, 0)
+        freq_score = corpus_freq / max_freq if max_freq > 0 else 0.0
+
+        doc_score = 0.3 if text in doc_entity_set else 0.0
+
+        W_WIDTH = 0.35
+        W_NLP = 0.25
+        W_LEAK = 0.15
+        W_CORPUS = 0.10
+        W_DOC = 0.15
+
+        total = (
+            W_WIDTH * width_fit
+            + W_NLP * nlp_score
+            + W_LEAK * leakage_score
+            + W_CORPUS * freq_score
+            + W_DOC * doc_score
+        )
+
+        scored.append({
+            "text": text,
+            "score": round(total, 4),
+            "width_fit": wr["width_fit"],
+            "width_ratio": wr["width_ratio"],
+            "width_pt": wr["width_pt"],
+            "nlp_score": round(nlp_score, 3),
+            "leakage_score": round(leakage_score, 3),
+            "corpus_freq": corpus_freq,
+            "in_same_doc": text in doc_entity_set,
+        })
+
+    scored.sort(key=lambda x: -x["score"])
+    return scored
+
+
+def corpus_entities_by_text(entities, text):
+    """Look up entity info for a given text string."""
+    types = set()
+    total = 0
+    for ent in entities:
+        if ent["entity_text"] == text:
+            types.add(ent["entity_type"])
+            total += ent["count"]
+    if not types:
+        return None
+    return {"types": list(types), "total_count": total}
+
+
+# -- Phase 6: API endpoint --
+
+def redaction_text_candidates(request, pk):
+    """Identify likely redacted text using NLP, width constraints, and leakage analysis."""
+    import fitz
+    import json
+
+    try:
+        r = RedactionRecord.objects.select_related(
+            "extracted_document", "extracted_document__extraction_run"
+        ).get(pk=pk)
+    except RedactionRecord.DoesNotExist:
+        return JsonResponse({"error": "Not found"}, status=404)
+
+    doc_record = r.extracted_document
+    run = doc_record.extraction_run
+    pdf_path = Path(doc_record.file_path)
+
+    dpi = 150
+    if isinstance(run.parameters, dict):
+        dpi = run.parameters.get("dpi", 150)
+    scale = dpi / 72.0
+
+    # 1. Gap type prediction
+    gap_predictions = _predict_gap_type(r.text_before, r.text_after)
+
+    # 2. Gather candidates from corpus entities
+    predicted_types = [p["entity_type"] for p in gap_predictions if p["confidence"] >= 0.3]
+    if not predicted_types:
+        predicted_types = ["PERSON", "ORG", "GPE"]
+
+    entity_qs = DocumentEntity.objects.filter(
+        entity_type__in=predicted_types
+    ).values("entity_text", "entity_type", "count", "extracted_document_id")
+
+    same_doc_entities = list(
+        DocumentEntity.objects.filter(extracted_document=doc_record)
+        .values("entity_text", "entity_type", "count")
+    )
+    same_doc_texts = {e["entity_text"] for e in same_doc_entities}
+
+    all_entities_raw = list(entity_qs[:2000])
+    for e in same_doc_entities:
+        e["doc_id"] = doc_record.pk
+    for e in all_entities_raw:
+        e["doc_id"] = e.get("extracted_document_id")
+
+    combined_entities = same_doc_entities + all_entities_raw
+
+    candidate_texts = set()
+    for e in combined_entities:
+        candidate_texts.add(e["entity_text"])
+
+    # Add user-provided candidates from request body
+    user_candidates = []
+    if request.method == "POST":
+        try:
+            body = json.loads(request.body)
+            user_candidates = body.get("candidates", [])
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    elif request.method == "GET":
+        raw = request.GET.get("candidates", "")
+        if raw:
+            user_candidates = [c.strip() for c in raw.split(",") if c.strip()]
+
+    for uc in user_candidates:
+        candidate_texts.add(uc)
+
+    # Also pull from CandidateList if any exist
+    for cl in CandidateList.objects.all():
+        for entry in (cl.entries or []):
+            if isinstance(entry, str) and entry.strip():
+                candidate_texts.add(entry.strip())
+
+    # 3. Width filtering using font identification + precise line-level gap
+    font_obj = None
+    font_size_pt = r.font_size_nearby or 10.0
+    font_scale_x = 1.0
+    font_letter_spacing = 0.0
+    font_word_spacing = 0.0
+    font_name = None
+    profile = None
+    gap_info = None
+
+    candidate_fonts = _load_candidate_fonts()
+    if pdf_path.is_file() and candidate_fonts:
+        try:
+            pdf_doc = fitz.open(str(pdf_path))
+            page = pdf_doc[r.page_num - 1]
+            raw_dict = page.get_text("rawdict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+
+            redaction_bbox_pt = (
+                r.bbox_x0_points, r.bbox_y0_points,
+                r.bbox_x1_points, r.bbox_y1_points,
+            )
+            gap_info = _measure_precise_gap(raw_dict, scale, redaction_bbox_pt)
+
+            pdf_doc.close()
+
+            redaction_bbox_px = [round(v * scale) for v in redaction_bbox_pt]
+            redaction_y_center_px = (redaction_bbox_px[1] + redaction_bbox_px[3]) / 2
+
+            profile, nearby_raw = _build_width_profile(raw_dict, scale, redaction_y_center_px)
+
+            if profile:
+                best_rmse = float("inf")
+                for name, css, fobj, bold, italic in candidate_fonts:
+                    rmse = _char_rmse(profile, fobj)
+                    if rmse < best_rmse:
+                        best_rmse = rmse
+                        font_obj = fobj
+                        font_name = name
+
+                if font_obj:
+                    font_scale_x, font_letter_spacing, font_word_spacing = \
+                        _estimate_rendering_params(profile, font_obj)
+
+                if nearby_raw:
+                    avg_fs = sum(s["font_size_pt"] for s in nearby_raw) / len(nearby_raw)
+                    font_size_pt = avg_fs
+        except Exception:
+            pass
+
+    redaction_width_pt = r.width_points
+
+    if font_obj and candidate_texts:
+        width_results = _filter_by_width(
+            list(candidate_texts), redaction_width_pt, font_obj,
+            font_size_pt, font_scale_x,
+            letter_spacing_norm=font_letter_spacing,
+            word_spacing_norm=font_word_spacing,
+            profile=profile,
+            gap_info=gap_info,
+        )
+    else:
+        width_results = [
+            {"text": t, "width_pt": 0, "width_ratio": 0, "width_fit": 0.5}
+            for t in candidate_texts
+        ]
+
+    # 4. Leakage analysis
+    leakage_data = {"ascender_fragments": [], "descender_fragments": []}
+    if r.has_ascender_leakage or r.has_descender_leakage:
+        try:
+            page_png = _render_single_page(pdf_path, r.page_num, dpi)
+            redaction_bbox_px = [round(v * scale) for v in (
+                r.bbox_x0_points, r.bbox_y0_points,
+                r.bbox_x1_points, r.bbox_y1_points,
+            )]
+            font_size_px = font_size_pt * scale
+            leakage_data = _analyze_leakage_letterforms(
+                page_png, redaction_bbox_px, font_size_px, dpi
+            )
+        except Exception:
+            pass
+
+    # 5. Score and rank
+    font_size_px = font_size_pt * scale
+    scored = _score_candidates(
+        width_results, gap_predictions, leakage_data,
+        font_size_px, doc_record, combined_entities,
+    )
+
+    fitting = [s for s in scored if s["width_fit"] > 0]
+    non_fitting = [s for s in scored if s["width_fit"] == 0]
+
+    char_count_min = 0
+    char_count_max = 0
+    if font_obj and redaction_width_pt > 0:
+        avg_advance = 0.5
+        advances = [font_obj.glyph_advance(ord(c)) for c in "etaoinsrhld"]
+        valid = [a for a in advances if a and a > 0]
+        if valid:
+            avg_advance = sum(valid) / len(valid)
+        char_count_at_1pt = redaction_width_pt / (avg_advance * font_scale_x * font_size_pt)
+        char_count_min = max(1, int(char_count_at_1pt * 0.85))
+        char_count_max = int(char_count_at_1pt * 1.15) + 1
+
+    return JsonResponse({
+        "gap_predictions": gap_predictions,
+        "leakage": leakage_data,
+        "candidates": fitting[:50],
+        "other_candidates": non_fitting[:20],
+        "total_candidates_checked": len(scored),
+        "font_identified": font_name,
+        "font_size_pt": round(font_size_pt, 2),
+        "redaction_width_pt": round(redaction_width_pt, 2),
+        "precise_gap_pt": round(gap_info["gap_pt"], 2) if gap_info else None,
+        "gap_context": {
+            "char_before": gap_info["char_before"],
+            "char_after": gap_info["char_after"],
+            "needs_space_before": gap_info["needs_space_before"],
+            "needs_space_after": gap_info["needs_space_after"],
+        } if gap_info else None,
+        "width_tolerance": "3% (line-fitted)" if gap_info else "15% (bbox)",
+        "estimated_char_range": [char_count_min, char_count_max],
+        "has_ascender_leakage": r.has_ascender_leakage,
+        "has_descender_leakage": r.has_descender_leakage,
     })
 
 

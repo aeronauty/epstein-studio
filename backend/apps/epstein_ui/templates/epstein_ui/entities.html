@@ -1,0 +1,109 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Entities - Epstein Studio</title>
+    <link rel="icon" href="{% static 'epstein_ui/favicon.ico' %}" type="image/x-icon" />
+    <link rel="stylesheet" href="{% static 'epstein_ui/style.css' %}?v=9" />
+  </head>
+  <body>
+    <div class="page ent-page">
+      <header class="topbar">
+        <div class="topbar-row">
+          <div class="topbar-left">
+            <a href="/" class="brand">Epstein Studio</a>
+          </div>
+          <div class="topbar-actions">
+            <a class="btn btn-secondary" href="/redactions-demo/">Redactions</a>
+            <a class="btn btn-secondary active" href="/entities/">Entities</a>
+            <a class="btn btn-secondary" href="/matches/">Matches</a>
+            <a class="btn btn-outline" href="/docs/">Docs</a>
+          </div>
+        </div>
+      </header>
+
+      <main class="ent-layout">
+        <div class="ent-header">
+          <h1>Named Entities</h1>
+          <p class="ent-subtitle">
+            {{ total_entities }} entities extracted &middot; {{ total_people }} unique people &middot; {{ total_candidates }} candidates loaded
+          </p>
+        </div>
+
+        <div class="ent-tabs">
+          <button class="ent-tab active" data-tab="entities">Extracted Entities</button>
+          <button class="ent-tab" data-tab="candidates">Candidate Lists</button>
+        </div>
+
+        <div id="tabEntities" class="ent-tab-panel">
+        <div class="ent-controls">
+          <div class="ent-search-row">
+            <input type="text" id="entSearch" class="ent-search" placeholder="Search entities..." autocomplete="off" />
+            <select id="entTypeFilter" class="ent-type-select">
+              <option value="">All types</option>
+            </select>
+            <select id="entSort" class="ent-sort-select">
+              <option value="frequency">Most frequent</option>
+              <option value="frequency_asc">Least frequent</option>
+              <option value="docs">Most documents</option>
+              <option value="alpha">A &rarr; Z</option>
+              <option value="alpha_desc">Z &rarr; A</option>
+              <option value="type">By type</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="ent-table-wrap">
+          <table class="ent-table" id="entTable">
+            <thead>
+              <tr>
+                <th class="ent-th-text">Entity</th>
+                <th class="ent-th-type">Type</th>
+                <th class="ent-th-count">Count</th>
+                <th class="ent-th-docs">Docs</th>
+              </tr>
+            </thead>
+            <tbody id="entBody"></tbody>
+          </table>
+          <div id="entEmpty" class="ent-empty" style="display:none">No entities match your filters.</div>
+          <div id="entLoading" class="ent-loading">Loading...</div>
+        </div>
+
+        <div class="ent-pager" id="entPager">
+          <button id="entPrev" class="btn btn-secondary btn-sm" disabled>&laquo; Prev</button>
+          <span id="entPageInfo" class="ent-page-info">Page 1</span>
+          <button id="entNext" class="btn btn-secondary btn-sm" disabled>Next &raquo;</button>
+        </div>
+
+        </div><!-- /tabEntities -->
+
+        <div id="tabCandidates" class="ent-tab-panel" style="display:none">
+          <p class="ent-cand-intro">
+            These are curated name lists used when matching text to redacted regions.
+            Names are tested for width-fit against each redaction.
+          </p>
+          <div id="candLists"></div>
+          <div class="ent-cand-add">
+            <h3>Add custom candidates</h3>
+            <input type="text" id="candNewListName" class="ent-search" placeholder="List name (e.g. 'My suspects')" style="max-width:280px" />
+            <textarea id="candNewListEntries" class="ent-cand-textarea" rows="4" placeholder="One name per line..."></textarea>
+            <button id="candAddBtn" class="btn btn-sm">Save list</button>
+          </div>
+        </div>
+
+        <!-- detail panel slides in -->
+        <div id="entDetail" class="ent-detail" style="display:none">
+          <div class="ent-detail-header">
+            <h2 id="entDetailTitle"></h2>
+            <button id="entDetailClose" class="btn btn-secondary btn-sm">&times;</button>
+          </div>
+          <div id="entDetailBody" class="ent-detail-body"></div>
+        </div>
+      </main>
+    </div>
+
+    <script src="{% static 'epstein_ui/entities.js' %}?v=2"></script>
+  </body>
+</html>
