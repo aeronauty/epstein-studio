@@ -247,15 +247,21 @@ class Command(BaseCommand):
                 for t in candidate_texts
             ]
 
-        # 4. Leakage analysis — always run
+        # 4. Leakage analysis — render at high DPI for sub-pixel sensitivity
         leakage_data = {"ascender_fragments": [], "descender_fragments": [],
                         "left_fragments": [], "right_fragments": []}
         try:
             pdf_path = Path(doc_record.file_path)
-            page_png = _render_single_page(pdf_path, r.page_num, dpi)
-            font_size_px = font_size_pt * scale
+            leak_dpi = 300
+            leak_scale = leak_dpi / 72.0
+            page_png = _render_single_page(pdf_path, r.page_num, leak_dpi)
+            leak_bbox_px = [round(v * leak_scale) for v in (
+                r.bbox_x0_points, r.bbox_y0_points,
+                r.bbox_x1_points, r.bbox_y1_points,
+            )]
+            font_size_px = font_size_pt * leak_scale
             leakage_data = _analyze_leakage_letterforms(
-                page_png, redaction_bbox_px, font_size_px, dpi
+                page_png, leak_bbox_px, font_size_px, leak_dpi
             )
             has_asc = bool(leakage_data.get("ascender_fragments"))
             has_desc = bool(leakage_data.get("descender_fragments"))

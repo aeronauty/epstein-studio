@@ -1411,72 +1411,120 @@ DESCENDER_LETTERS = set("gjpqyQJ")
 
 
 def _analyze_leakage_letterforms(page_pixmap_path, redaction_bbox_px, font_size_px, dpi):
-    """Analyze pixel bands above/below/left/right of redaction for leaked letterform fragments."""
+    """Analyze pixel bands immediately adjacent to redaction for leaked letterform fragments.
+
+    Only counts fragments that are connected to (touch) the redaction edge,
+    distinguishing real leakage from nearby surrounding text.
+    """
     import numpy as np
     from PIL import Image
 
+    empty = {"ascender_fragments": [], "descender_fragments": [],
+             "left_fragments": [], "right_fragments": []}
     try:
         img = Image.open(str(page_pixmap_path)).convert("L")
     except Exception:
-        return {"ascender_fragments": [], "descender_fragments": [],
-                "left_fragments": [], "right_fragments": []}
+        return empty
 
     img_array = np.array(img)
     h, w = img_array.shape
     x0, y0, x1, y1 = [int(v) for v in redaction_bbox_px]
 
-    ascender_band_h = max(2, int(font_size_px * 0.35))
-    descender_band_h = max(2, int(font_size_px * 0.25))
-    edge_band_w = max(3, int(font_size_px * 0.6))
+    ascender_band_h = max(3, int(font_size_px * 0.25))
+    descender_band_h = max(3, int(font_size_px * 0.20))
+    edge_band_w = max(3, int(font_size_px * 0.30))
+
+    # Skip the redaction box's own anti-aliased boundary (2-3px at 300 DPI).
+    aa_inset = max(2, int(dpi / 100))
 
     results = {"ascender_fragments": [], "descender_fragments": [],
                "left_fragments": [], "right_fragments": []}
 
-    band_top_y0 = max(0, y0 - ascender_band_h)
-    band_top_y1 = y0
+    # Top band: skip aa_inset rows closest to redaction (box AA), then scan upward.
+    band_top_y0 = max(0, y0 - ascender_band_h - aa_inset)
+    band_top_y1 = max(0, y0 - aa_inset)
     if band_top_y1 > band_top_y0 and x1 > x0:
         band = img_array[band_top_y0:band_top_y1, x0:x1]
-        fragments = _find_dark_fragments(band, x0, font_size_px)
+        fragments = _find_dark_fragments(band, x0, font_size_px,
+                                         require_edge="bottom")
         results["ascender_fragments"] = fragments
 
-    band_bot_y0 = y1
-    band_bot_y1 = min(h, y1 + descender_band_h)
+    # Bottom band: skip aa_inset rows closest to redaction (box AA).
+    band_bot_y0 = min(h, y1 + aa_inset)
+    band_bot_y1 = min(h, y1 + descender_band_h + aa_inset)
     if band_bot_y1 > band_bot_y0 and x1 > x0:
         band = img_array[band_bot_y0:band_bot_y1, x0:x1]
-        fragments = _find_dark_fragments(band, x0, font_size_px)
+        fragments = _find_dark_fragments(band, x0, font_size_px,
+                                         require_edge="top")
         results["descender_fragments"] = fragments
 
-    left_x0 = max(0, x0 - edge_band_w)
-    left_x1 = x0
+    # Left band: skip aa_inset cols closest to redaction.
+    left_x0 = max(0, x0 - edge_band_w - aa_inset)
+    left_x1 = max(0, x0 - aa_inset)
     if left_x1 > left_x0 and y1 > y0:
         band = img_array[y0:y1, left_x0:left_x1]
-        fragments = _find_dark_fragments_vertical(band, y0, font_size_px)
+        fragments = _find_dark_fragments_vertical(band, y0, font_size_px,
+                                                  require_edge="right")
         results["left_fragments"] = fragments
 
-    right_x0 = x1
-    right_x1 = min(w, x1 + edge_band_w)
+    # Right band: skip aa_inset cols closest to redaction.
+    right_x0 = min(w, x1 + aa_inset)
+    right_x1 = min(w, x1 + edge_band_w + aa_inset)
     if right_x1 > right_x0 and y1 > y0:
         band = img_array[y0:y1, right_x0:right_x1]
-        fragments = _find_dark_fragments_vertical(band, y0, font_size_px)
+        fragments = _find_dark_fragments_vertical(band, y0, font_size_px,
+                                                  require_edge="left")
         results["right_fragments"] = fragments
 
     return results
 
 
-def _find_dark_fragments_vertical(band, y_offset, font_size_px):
-    """Find dark pixel regions in a vertical edge band (columns scanned for row presence)."""
+def _find_dark_fragments_vertical(band, y_offset, font_size_px, require_edge=None):
+    """Find dark pixel regions in a vertical edge band.
+
+    require_edge: "left" means fragment must have dark pixels in leftmost 3 cols,
+                  "right" means fragment must have dark pixels in rightmost 3 cols.
+    """
     import numpy as np
 
     if band.size == 0:
         return []
 
-    threshold = 180
+    threshold = 160
     dark_mask = band < threshold
     row_has_dark = np.any(dark_mask, axis=1)
+    band_h, band_w = dark_mask.shape
+
+    max_frag_h = max(4, int(font_size_px * 0.8))
 
     fragments = []
     in_fragment = False
     frag_start = 0
+
+    def _emit(start, end):
+        frag_h = end - start
+        if frag_h < 2 or frag_h > max_frag_h:
+            return
+        frag_region = dark_mask[start:end, :]
+        if require_edge == "left":
+            edge_cols = min(3, band_w)
+            if not np.any(frag_region[:, :edge_cols]):
+                return
+        elif require_edge == "right":
+            edge_cols = min(3, band_w)
+            if not np.any(frag_region[:, -edge_cols:]):
+                return
+        density = float(np.sum(frag_region)) / max(frag_region.size, 1)
+        if density < 0.03:
+            return
+        frag_w = int(np.max(np.sum(dark_mask[start:end, :], axis=0)))
+        fragments.append({
+            "y_start": start + y_offset,
+            "y_end": end + y_offset,
+            "height_px": frag_h,
+            "width_px": frag_w,
+            "pixel_density": round(density, 3),
+        })
 
     for row_idx in range(len(row_has_dark)):
         if row_has_dark[row_idx]:
@@ -1485,53 +1533,64 @@ def _find_dark_fragments_vertical(band, y_offset, font_size_px):
                 in_fragment = True
         else:
             if in_fragment:
-                frag_h = row_idx - frag_start
-                if frag_h >= 2:
-                    frag_region = dark_mask[frag_start:row_idx, :]
-                    density = float(np.sum(frag_region)) / max(frag_region.size, 1)
-                    frag_w = int(np.max(np.sum(dark_mask[frag_start:row_idx, :], axis=0)))
-                    fragments.append({
-                        "y_start": frag_start + y_offset,
-                        "y_end": row_idx + y_offset,
-                        "height_px": frag_h,
-                        "width_px": frag_w,
-                        "pixel_density": round(density, 3),
-                    })
+                _emit(frag_start, row_idx)
                 in_fragment = False
 
     if in_fragment:
-        row_idx = len(row_has_dark)
-        frag_h = row_idx - frag_start
-        if frag_h >= 2:
-            frag_region = dark_mask[frag_start:row_idx, :]
-            density = float(np.sum(frag_region)) / max(frag_region.size, 1)
-            frag_w = int(np.max(np.sum(dark_mask[frag_start:row_idx, :], axis=0)))
-            fragments.append({
-                "y_start": frag_start + y_offset,
-                "y_end": row_idx + y_offset,
-                "height_px": frag_h,
-                "width_px": frag_w,
-                "pixel_density": round(density, 3),
-            })
+        _emit(frag_start, len(row_has_dark))
 
     return fragments
 
 
-def _find_dark_fragments(band, x_offset, font_size_px):
-    """Find connected dark pixel regions in a grayscale band image.
-    Returns list of {x_start, x_end, position_estimate, width_px, pixel_density}."""
+def _find_dark_fragments(band, x_offset, font_size_px, require_edge=None):
+    """Find connected dark pixel regions in a horizontal band.
+
+    require_edge: "top" means fragment must have dark pixels in topmost 3 rows
+                  (i.e. touching the redaction edge for a bottom-band),
+                  "bottom" means fragment must have dark pixels in bottommost 3 rows
+                  (i.e. touching the redaction edge for a top-band).
+    """
     import numpy as np
 
     if band.size == 0:
         return []
 
-    threshold = 180
+    threshold = 160
     dark_mask = band < threshold
+    band_h, band_w = dark_mask.shape
+
+    max_frag_w = max(4, int(font_size_px * 1.2))
 
     col_has_dark = np.any(dark_mask, axis=0)
     fragments = []
     in_fragment = False
     frag_start = 0
+
+    def _emit(start, end):
+        frag_width = end - start
+        if frag_width < 2 or frag_width > max_frag_w:
+            return
+        frag_region = dark_mask[:, start:end]
+        if require_edge == "top":
+            edge_rows = min(3, band_h)
+            if not np.any(frag_region[:edge_rows, :]):
+                return
+        elif require_edge == "bottom":
+            edge_rows = min(3, band_h)
+            if not np.any(frag_region[-edge_rows:, :]):
+                return
+        density = float(np.sum(frag_region)) / max(frag_region.size, 1)
+        if density < 0.03:
+            return
+        avg_char_w = max(font_size_px * 0.5, 1)
+        position = (start + frag_width / 2) / avg_char_w
+        fragments.append({
+            "x_start": start + x_offset,
+            "x_end": end + x_offset,
+            "width_px": frag_width,
+            "pixel_density": round(density, 3),
+            "position_estimate": round(position, 1),
+        })
 
     for col_idx in range(len(col_has_dark)):
         if col_has_dark[col_idx]:
@@ -1540,102 +1599,80 @@ def _find_dark_fragments(band, x_offset, font_size_px):
                 in_fragment = True
         else:
             if in_fragment:
-                frag_width = col_idx - frag_start
-                if frag_width >= 2:
-                    frag_region = dark_mask[:, frag_start:col_idx]
-                    density = float(np.sum(frag_region)) / max(frag_region.size, 1)
-                    avg_char_w = max(font_size_px * 0.5, 1)
-                    position = (frag_start + frag_width / 2) / avg_char_w
-
-                    fragments.append({
-                        "x_start": frag_start + x_offset,
-                        "x_end": col_idx + x_offset,
-                        "width_px": frag_width,
-                        "pixel_density": round(density, 3),
-                        "position_estimate": round(position, 1),
-                    })
+                _emit(frag_start, col_idx)
                 in_fragment = False
 
     if in_fragment:
-        col_idx = len(col_has_dark)
-        frag_width = col_idx - frag_start
-        if frag_width >= 2:
-            frag_region = dark_mask[:, frag_start:col_idx]
-            density = float(np.sum(frag_region)) / max(frag_region.size, 1)
-            avg_char_w = max(font_size_px * 0.5, 1)
-            position = (frag_start + frag_width / 2) / avg_char_w
-            fragments.append({
-                "x_start": frag_start + x_offset,
-                "x_end": col_idx + x_offset,
-                "width_px": frag_width,
-                "pixel_density": round(density, 3),
-                "position_estimate": round(position, 1),
-            })
+        _emit(frag_start, len(col_has_dark))
 
     return fragments
 
 
 def _match_leakage_to_candidates(leakage_data, candidate_text, font_size_px):
-    """Score how well a candidate's letter positions match observed leakage fragments."""
+    """Score how well a candidate's character types match observed leakage.
+
+    Uses a type-based approach: checks whether the candidate has
+    ascenders/descenders consistent with detected fragment locations,
+    rather than trying to match imprecise pixel positions to exact characters.
+    """
     asc_frags = leakage_data.get("ascender_fragments", [])
     desc_frags = leakage_data.get("descender_fragments", [])
     left_frags = leakage_data.get("left_fragments", [])
     right_frags = leakage_data.get("right_fragments", [])
 
     if not asc_frags and not desc_frags and not left_frags and not right_frags:
-        return 0.5
+        return 0.0
 
-    avg_char_w = max(font_size_px * 0.5, 1)
     score = 0.0
     checks = 0
 
-    for frag in asc_frags:
-        pos = frag["position_estimate"]
-        char_idx = int(round(pos))
-        if 0 <= char_idx < len(candidate_text):
-            ch = candidate_text[char_idx]
-            if ch in ASCENDER_LETTERS:
-                score += 1.0
-            else:
-                score -= 0.5
-            checks += 1
-        elif char_idx < len(candidate_text):
-            checks += 1
+    cand_has_ascender = any(ch in ASCENDER_LETTERS for ch in candidate_text)
+    cand_has_descender = any(ch in DESCENDER_LETTERS for ch in candidate_text)
+    cand_has_upper = any(ch.isupper() for ch in candidate_text)
+    n_asc = sum(1 for ch in candidate_text if ch in ASCENDER_LETTERS)
+    n_desc = sum(1 for ch in candidate_text if ch in DESCENDER_LETTERS)
 
-    for frag in desc_frags:
-        pos = frag["position_estimate"]
-        char_idx = int(round(pos))
-        if 0 <= char_idx < len(candidate_text):
-            ch = candidate_text[char_idx]
-            if ch in DESCENDER_LETTERS:
-                score += 1.0
-            else:
-                score -= 0.5
-            checks += 1
+    if asc_frags:
+        checks += 1
+        if cand_has_ascender or cand_has_upper:
+            frag_count_match = min(len(asc_frags), n_asc + sum(1 for c in candidate_text if c.isupper()))
+            score += min(1.0, frag_count_match / max(len(asc_frags), 1))
+        else:
+            score -= 0.3
+
+    if desc_frags:
+        checks += 1
+        if cand_has_descender:
+            frag_count_match = min(len(desc_frags), n_desc)
+            score += min(1.0, frag_count_match / max(len(desc_frags), 1))
+        else:
+            score -= 0.3
 
     if left_frags:
-        first_ch = candidate_text[0] if candidate_text else ""
-        if first_ch and (first_ch in ASCENDER_LETTERS or first_ch in DESCENDER_LETTERS or first_ch.isupper()):
-            score += 0.5
         checks += 1
+        first_ch = candidate_text[0] if candidate_text else ""
+        if first_ch and (first_ch in ASCENDER_LETTERS or first_ch in DESCENDER_LETTERS
+                         or first_ch.isupper()):
+            score += 0.5
+        else:
+            score -= 0.1
 
     if right_frags:
+        checks += 1
         last_ch = candidate_text[-1] if candidate_text else ""
         if last_ch and (last_ch in ASCENDER_LETTERS or last_ch in DESCENDER_LETTERS):
             score += 0.5
+
+    # Negative evidence: no ascender leakage but candidate has ascenders
+    # is mildly inconsistent (though the redaction may simply cover them).
+    # Don't penalize, but give a small bonus to candidates without.
+    if not asc_frags and not cand_has_ascender and not cand_has_upper:
+        score += 0.15
         checks += 1
 
-    if not asc_frags:
-        has_ascender = any(ch in ASCENDER_LETTERS for ch in candidate_text if ch.isalpha())
-        if not has_ascender:
-            score += 0.3
-            checks += 1
-
-    if not desc_frags:
-        has_descender = any(ch in DESCENDER_LETTERS for ch in candidate_text)
-        if not has_descender:
-            score += 0.3
-            checks += 1
+    if not desc_frags and not cand_has_descender:
+        score += 0.15
+        checks += 1
 
     return max(0.0, min(1.0, score / max(checks, 1)))
 
@@ -1864,18 +1901,20 @@ def redaction_text_candidates(request, pk):
             for t in candidate_texts
         ]
 
-    # 4. Leakage analysis — always run (detect on-the-fly)
+    # 4. Leakage analysis — render at high DPI for sub-pixel sensitivity
     leakage_data = {"ascender_fragments": [], "descender_fragments": [],
                     "left_fragments": [], "right_fragments": []}
     try:
-        page_png = _render_single_page(pdf_path, r.page_num, dpi)
-        redaction_bbox_px = [round(v * scale) for v in (
+        leak_dpi = 300
+        leak_scale = leak_dpi / 72.0
+        page_png = _render_single_page(pdf_path, r.page_num, leak_dpi)
+        redaction_bbox_px = [round(v * leak_scale) for v in (
             r.bbox_x0_points, r.bbox_y0_points,
             r.bbox_x1_points, r.bbox_y1_points,
         )]
-        font_size_px = font_size_pt * scale
+        font_size_px = font_size_pt * leak_scale
         leakage_data = _analyze_leakage_letterforms(
-            page_png, redaction_bbox_px, font_size_px, dpi
+            page_png, redaction_bbox_px, font_size_px, leak_dpi
         )
         has_asc = bool(leakage_data.get("ascender_fragments"))
         has_desc = bool(leakage_data.get("descender_fragments"))
